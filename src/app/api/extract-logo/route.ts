@@ -4,9 +4,9 @@ import { v2 as cloudinary } from 'cloudinary';
 
 // Configure Cloudinary
 cloudinary.config({
-  cloud_name: 'dyn40clci',
-  api_key: '328476136325637',
-  api_secret: 'a7MiQt_aMZfhuCe2891nUdgJDVs',
+  cloud_name: 'dduwiqu4j',
+  api_key: '735486643625886',
+  api_secret: 'EQVhBgJCEv3t_EgfKHcKSjEJTqA',
 });
 
 const BANNED_KEYWORDS = ['facebook', 'instagram', 'twitter', 'linkedin', 'tiktok', 'youtube', 'pinterest', 'google', 'placeholder', 'spinner'];
