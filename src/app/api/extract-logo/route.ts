@@ -215,6 +215,9 @@ function resolveUrl(rawUrl: string, baseUrl: string): string {
 // ---------------------------------------------------------
 // MAIN API ENDPOINT (For n8n)
 // ---------------------------------------------------------
+// ---------------------------------------------------------
+// MAIN API ENDPOINT (For n8n)
+// ---------------------------------------------------------
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -234,19 +237,37 @@ export async function POST(req: Request) {
     let imageResponse: any;
 
     if (finalDownloadUrl) {
-      imageResponse = await fetch(finalDownloadUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(10000)
-      });
+      try {
+        imageResponse = await fetch(finalDownloadUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          signal: AbortSignal.timeout(10000)
+        });
+      } catch (e) {
+        console.log("Primary extraction fetch failed, moving to fallback.");
+      }
     }
 
-    // Fallbacks: Clearbit -> UI Avatars
+    // ---------------------------------------------------------
+    // NEW, CRASH-PROOF FALLBACK LOGIC
+    // ---------------------------------------------------------
     if (!imageResponse || !imageResponse.ok) {
-      imageResponse = await fetch(`https://logo.clearbit.com/${domain}`, { signal: AbortSignal.timeout(5000) });
-      if (!imageResponse.ok) {
+      try {
+        // Fallback 1: Google's High-Res Favicon API (Replaces dead Clearbit)
+        imageResponse = await fetch(`https://www.google.com/s2/favicons?domain=${domain}&sz=256`, { 
+          signal: AbortSignal.timeout(5000) 
+        });
+        
+        if (!imageResponse.ok) throw new Error("Google Favicon failed");
+      } catch (fallbackErr) {
+        // Fallback 2: UI Avatars (If Google fails or network crashes)
         const textLogoUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(domain)}&background=random&color=fff&size=512&format=png`;
         imageResponse = await fetch(textLogoUrl);
       }
+    }
+
+    // Ensure we actually got an image before converting to buffer
+    if (!imageResponse || !imageResponse.ok) {
+       return NextResponse.json({ success: false, error: "All logo extraction methods failed." }, { status: 404 });
     }
 
     const arrayBuffer = await imageResponse.arrayBuffer();
