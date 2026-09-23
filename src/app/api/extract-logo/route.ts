@@ -28,15 +28,18 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
         if (error) return reject(error);
         if (!result) return reject(new Error("Upload failed"));
 
-        // Add transformations: Transparent background, trim whitespace, convert to AVIF, auto compress
+        // Add transformations: 
+        // 1. f_avif -> Convert to modern AVIF format
+        // 2. q_auto:best -> Do not decrease quality. Use the highest visual fidelity possible.
+        // NOTE: Background removal (e_make_transparent) and cropping (e_trim) have been REMOVED.
         const optimizedUrl = result.secure_url.replace(
           '/upload/',
-          '/upload/e_make_transparent:15,co_white/e_trim/f_avif,q_auto/'
+          '/upload/f_avif,q_auto:best/'
         );
 
         // Extract the Top 3 colors from Cloudinary's response
         let primary = null, secondary = null, tertiary = null;
-        
+
         if (result.colors && result.colors.length > 0) {
           // Cloudinary returns arrays like: [ [ '#FFFFFF', 45.5 ], [ '#000000', 30.2 ] ]
           primary = result.colors[0]?.[0] || null;
@@ -44,9 +47,9 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
           tertiary = result.colors[2]?.[0] || null;
         }
 
-        resolve({ 
-          url: optimizedUrl, 
-          colors: { primary, secondary, tertiary } 
+        resolve({
+          url: optimizedUrl,
+          colors: { primary, secondary, tertiary }
         });
       }
     );
@@ -73,23 +76,26 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
     if (!response.ok) throw new Error('Failed to fetch HTML');
 
     let html = await response.text();
-    
+
     // FIX 1: Unwrap <noscript> tags
     html = html.replace(/<noscript([^>]*)>/gi, '<div$1>').replace(/<\/noscript>/gi, '</div>');
 
     const $ = cheerio.load(html);
     let logoUrl: string | null = null;
 
+    // Helper: Safely extract real image URL (Fixed the || glitch here)
     // Helper: Safely extract real image URL
     const getBestImageSrc = (imgEl: any): string | null => {
       let src = $(imgEl).attr('data-src') || $(imgEl).attr('src');
+
       if (!src || src.startsWith('data:image')) {
         const srcset = $(imgEl).attr('srcset') || $(imgEl).attr('data-srcset');
         if (srcset) {
-           src = srcset.split(',')[0].trim().split(' ')[0];
+          src = srcset.split(',')[0].trim().split(' ')[0];
         }
       }
-      if (src && src.startsWith('data:image')) return null; 
+
+      if (src && src.startsWith('data:image')) return null;
       return src || null;
     };
 
@@ -105,24 +111,24 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       const style = $(el).attr('style') || '';
       // Extract URL from style="background-image: url(...)"
       const match = style.match(/background-image:\s*url\s*\(\s*(.*?)\s*\)/i);
-      
+
       if (match && match[1]) {
         // Clean up &quot; and quotes
         let src = match[1].replace(/&quot;/g, '').replace(/^['"]|['"]$/g, '');
-        
+
         if (isValidLogo(src)) {
-          // If it's Moego, we aggressively assume this is the logo (since it matches your specific case)
+          // If it's Moego, we aggressively assume this is the logo
           if (domain.includes('moego')) {
             logoUrl = src;
             return false; // Break loop
           }
-          
+
           // Otherwise, only grab it if the div has 'logo' in class or ID
           const className = $(el).attr('class') || '';
           const id = $(el).attr('id') || '';
           if (className.toLowerCase().includes('logo') || id.toLowerCase().includes('logo')) {
             logoUrl = src;
-            return false; 
+            return false;
           }
         }
       }
@@ -131,7 +137,6 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
     if (logoUrl) return resolveUrl(logoUrl, secureUrl);
 
     // --- STRATEGY 0.5: MOEGO JS PAYLOAD FALLBACK ---
-    // Sometimes Moego renders on the client. If Cheerio misses it, we regex the raw HTML for AWS links.
     if (domain.includes('moego')) {
       const rawS3Match = html.match(/https:\/\/moegonew\.s3[^"'\\]+\.(jpeg|jpg|png|webp|avif)/i);
       if (rawS3Match) return resolveUrl(rawS3Match[0], secureUrl);
@@ -144,8 +149,8 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
 
       const cleanHref = href.split('?')[0].replace(/\/$/, '');
       const isHomeLink = cleanHref === '' || cleanHref === '/' || cleanHref === baseUrlNoSlash ||
-                         cleanHref === `http://${domain}` || cleanHref === `https://${domain}` ||
-                         cleanHref === `http://www.${domain}` || cleanHref === `https://www.${domain}`;
+        cleanHref === `http://${domain}` || cleanHref === `https://${domain}` ||
+        cleanHref === `http://www.${domain}` || cleanHref === `https://www.${domain}`;
 
       if (isHomeLink) {
         const img = $(a).find('img').first();
@@ -153,7 +158,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
           const src = getBestImageSrc(img[0]);
           if (isValidLogo(src)) {
             logoUrl = src;
-            return false; 
+            return false;
           }
         }
       }
@@ -177,7 +182,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
 
     // --- STRATEGY 3: Strict Attributes & Class Names ---
     const targetedSelectors = [
-      'img[class*="logo" i]', 'img[id*="logo" i]', '.site-logo img', 
+      'img[class*="logo" i]', 'img[id*="logo" i]', '.site-logo img',
       '.navbar-brand img', 'header img', '[class*="header"] img'
     ];
 
@@ -186,7 +191,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
         const src = getBestImageSrc(img);
         if (isValidLogo(src)) {
           logoUrl = src;
-          return false; 
+          return false;
         }
       });
       if (logoUrl) break;
@@ -212,9 +217,6 @@ function resolveUrl(rawUrl: string, baseUrl: string): string {
   try { return new URL(rawUrl, baseUrl).href; } catch { return rawUrl; }
 }
 
-// ---------------------------------------------------------
-// MAIN API ENDPOINT (For n8n)
-// ---------------------------------------------------------
 // ---------------------------------------------------------
 // MAIN API ENDPOINT (For n8n)
 // ---------------------------------------------------------
@@ -253,10 +255,10 @@ export async function POST(req: Request) {
     if (!imageResponse || !imageResponse.ok) {
       try {
         // Fallback 1: Google's High-Res Favicon API (Replaces dead Clearbit)
-        imageResponse = await fetch(`https://www.google.com/s2/favicons?domain=${domain}&sz=256`, { 
-          signal: AbortSignal.timeout(5000) 
+        imageResponse = await fetch(`https://www.google.com/s2/favicons?domain=${domain}&sz=256`, {
+          signal: AbortSignal.timeout(5000)
         });
-        
+
         if (!imageResponse.ok) throw new Error("Google Favicon failed");
       } catch (fallbackErr) {
         // Fallback 2: UI Avatars (If Google fails or network crashes)
@@ -267,7 +269,7 @@ export async function POST(req: Request) {
 
     // Ensure we actually got an image before converting to buffer
     if (!imageResponse || !imageResponse.ok) {
-       return NextResponse.json({ success: false, error: "All logo extraction methods failed." }, { status: 404 });
+      return NextResponse.json({ success: false, error: "All logo extraction methods failed." }, { status: 404 });
     }
 
     const arrayBuffer = await imageResponse.arrayBuffer();
