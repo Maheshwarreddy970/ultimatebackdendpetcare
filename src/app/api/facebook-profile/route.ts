@@ -18,21 +18,25 @@ const APIFY_TOKENS = [
   'apify_api_zP6UkcgE9nEdRfvtxgfH9C9S9VG50G26Ch4U',
   'apify_api_NkPekUe1mhtcpLovU8fKmQPxFDj5oM4q00FG',
   'apify_api_Z3q3Jydg3u2k1TM4ELrWYcIUIa4hJC12BcNW',
-  'apify_api_SoNIAG1xuFYPPzs3eZEenIedgryI7a3xcivO' // Added from your snippet
+  'apify_api_SoNIAG1xuFYPPzs3eZEenIedgryI7a3xcivO' 
 ];
 
 let currentApifyIndex = 0;
 
 // ---------------------------------------------------------
-// HIGH-RES FACEBOOK URL CONVERTER
+// HIGH-RES FACEBOOK URL CONVERTER (More Aggressive)
 // ---------------------------------------------------------
 function upgradeFacebookImageUrl(url: string): string {
   if (!url) return url;
-  return url
-    .replace(/s\d+x\d+/g, 's600x600')
-    .replace(/p\d+x\d+/g, 'p600x600')
-    .replace(/mx\d+x\d+/g, 'mx600x600')
-    .replace(/ctp=s\d+x\d+/g, 'ctp=s600x600');
+  let newUrl = url;
+  
+  // 1. Force any size in query parameters to 1080x1080 (e.g., stp=dst-jpg_s200x200 -> 1080)
+  newUrl = newUrl.replace(/([smp]\d+x\d+)/g, 's1080x1080');
+  
+  // 2. Remove scaling directories hidden in the URL path itself (e.g., /s200x200/ -> /)
+  newUrl = newUrl.replace(/\/[a-z]\d+x\d+\//g, '/');
+
+  return newUrl;
 }
 
 // ---------------------------------------------------------
@@ -52,10 +56,12 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
         if (error) return reject(error);
         if (!result) return reject(new Error("Upload failed"));
 
-        // Max quality AVIF conversion (No background removal, best quality)
+        // 🔥 NEW TRANSFORMATIONS:
+        // w_600, h_600, c_fill, g_auto: Locks size to exactly 600x600, crops perfectly based on the subject's face/center.
+        // f_avif, q_auto:best: Delivers in AVIF format with the highest visual fidelity possible.
         const optimizedUrl = result.secure_url.replace(
           '/upload/',
-          '/upload/f_avif,q_auto:best/'
+          '/upload/w_600,h_600,c_fill,g_auto,f_avif,q_auto:best/'
         );
 
         let primary = null, secondary = null, tertiary = null;
@@ -163,18 +169,20 @@ export async function POST(req: Request) {
       rawImageUrl = await getProfilePicViaApify(facebookUrl);
     }
 
-    // 2. Transform low-res URL to crisp 600x600 resolution
+    // 2. Transform low-res URL to crisp 1080x1080 resolution
     const highResImageUrl = upgradeFacebookImageUrl(rawImageUrl);
     console.log("Upgraded Image URL:", highResImageUrl);
 
-    // 3. Fetch the Image Buffer
+    // 3. Fetch the Image Buffer (Try high-res first)
     let imageResponse = await fetch(highResImageUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
       signal: AbortSignal.timeout(10000)
     });
 
+    // Sometimes removing path parameters breaks Facebook's signature hashes (403 Forbidden).
+    // If that happens, we safely fallback to the original image so it doesn't crash.
     if (!imageResponse.ok) {
-      console.warn("High-Res fetch failed, falling back to original resolution...");
+      console.warn(`High-Res fetch failed (Status: ${imageResponse.status}), falling back to original resolution...`);
       imageResponse = await fetch(rawImageUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0' },
         signal: AbortSignal.timeout(10000)
