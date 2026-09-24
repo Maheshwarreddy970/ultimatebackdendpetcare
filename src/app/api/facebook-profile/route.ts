@@ -18,24 +18,67 @@ const APIFY_TOKENS = [
   'apify_api_zP6UkcgE9nEdRfvtxgfH9C9S9VG50G26Ch4U',
   'apify_api_NkPekUe1mhtcpLovU8fKmQPxFDj5oM4q00FG',
   'apify_api_Z3q3Jydg3u2k1TM4ELrWYcIUIa4hJC12BcNW',
-  'apify_api_SoNIAG1xuFYPPzs3eZEenIedgryI7a3xcivO' 
+  'apify_api_SoNIAG1xuFYPPzs3eZEenIedgryI7a3xcivO'
 ];
 
 let currentApifyIndex = 0;
 
 // ---------------------------------------------------------
-// HIGH-RES FACEBOOK URL CONVERTER (Safe & Precise)
+// 1. BUILT-IN FACEBOOK URL CLEANER (Replaces n8n code node)
+// ---------------------------------------------------------
+function cleanFacebookUrl(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== "string" || rawUrl.trim() === "") {
+    return "";
+  }
+
+  let currentUrl = rawUrl.trim();
+
+  // Add https:// if missing
+  if (!currentUrl.startsWith("http")) {
+    currentUrl = "https://" + currentUrl;
+  }
+
+  try {
+    const urlObj = new URL(currentUrl);
+
+    // Force standard www domain
+    if (urlObj.hostname.includes("facebook.com")) {
+      urlObj.hostname = "www.facebook.com";
+    }
+
+    // Break URL into segments (e.g. /SpottedDogLC/reels -> ["SpottedDogLC", "reels"])
+    const segments = urlObj.pathname.split("/").filter(Boolean);
+
+    if (segments.length > 0) {
+      if (segments[0] === "profile.php") {
+        // Keep the ?id= parameter for profile.php
+        const profileId = urlObj.searchParams.get("id");
+        return profileId ? `https://www.facebook.com/profile.php?id=${profileId}` : `https://www.facebook.com/`;
+      } else {
+        // Grab ONLY the first segment, automatically dropping /reels, /about, etc.
+        return `https://www.facebook.com/${segments[0]}`;
+      }
+    }
+
+    return `https://www.facebook.com/`;
+  } catch (error) {
+    // Fallback if URL is completely un-parsable
+    return rawUrl;
+  }
+}
+
+// ---------------------------------------------------------
+// 2. HIGH-RES FACEBOOK URL CONVERTER
 // ---------------------------------------------------------
 function upgradeFacebookImageUrl(url: string): string {
   if (!url) return url;
-  
   // Safely targets ONLY the resolution numbers (e.g., changing 200x200 to 960x960).
-  // This perfectly matches your working URL structure and avoids breaking Facebook's security hashes.
+  // This preserves Facebook security signatures so it doesn't get blocked.
   return url.replace(/\d+x\d+/g, '960x960');
 }
 
 // ---------------------------------------------------------
-// CLOUDINARY UPLOADER
+// 3. CLOUDINARY UPLOADER
 // ---------------------------------------------------------
 async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -77,7 +120,7 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
 }
 
 // ---------------------------------------------------------
-// APIFY SCRAPER WITH ROTATION
+// 4. APIFY SCRAPER WITH ROTATION
 // ---------------------------------------------------------
 async function getProfilePicViaApify(facebookUrl: string): Promise<string> {
   let attempts = 0;
@@ -134,10 +177,9 @@ async function getProfilePicViaApify(facebookUrl: string): Promise<string> {
         console.warn(`Token ${currentApifyIndex} rate limited. Rotating...`);
         currentApifyIndex = (currentApifyIndex + 1) % APIFY_TOKENS.length;
         attempts++;
-        continue; // Try the next token in the loop
+        continue;
       }
 
-      // If it's a genuine error (like page doesn't exist), throw it immediately
       throw error;
     }
   }
@@ -146,29 +188,29 @@ async function getProfilePicViaApify(facebookUrl: string): Promise<string> {
 }
 
 // ---------------------------------------------------------
-// MAIN API ENDPOINT (For n8n)
+// 5. MAIN API ENDPOINT (For n8n)
 // ---------------------------------------------------------
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const facebookUrl = body.facebookUrl;
-    let rawImageUrl = body.facebookImageUrl; // Optional bypass
+    const rawFacebookUrl = body.facebookUrl;
+    let rawImageUrl = body.facebookImageUrl; 
 
-    if (!facebookUrl && !rawImageUrl) {
+    if (!rawFacebookUrl && !rawImageUrl) {
       return NextResponse.json({ success: false, error: "Provide either facebookUrl or facebookImageUrl" }, { status: 400 });
     }
 
-    // 1. Scrape via Apify if direct image wasn't provided
+    // -> THE URL IS NOW CLEANED AUTOMATICALLY BY NEXT.JS!
+    const facebookUrl = cleanFacebookUrl(rawFacebookUrl);
+
     if (!rawImageUrl) {
-      console.log(`Scraping FB Profile for: ${facebookUrl}`);
+      console.log(`Scraping Cleaned FB Profile: ${facebookUrl}`);
       rawImageUrl = await getProfilePicViaApify(facebookUrl);
     }
 
-    // 2. Transform low-res URL to crisp 960x960 resolution safely
     const highResImageUrl = upgradeFacebookImageUrl(rawImageUrl);
     console.log("Upgraded Image URL:", highResImageUrl);
 
-    // 3. Fetch the Image Buffer (Try high-res first)
     let imageResponse = await fetch(highResImageUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
       signal: AbortSignal.timeout(10000)
@@ -187,17 +229,16 @@ export async function POST(req: Request) {
     const arrayBuffer = await imageResponse.arrayBuffer();
     const finalBuffer = Buffer.from(arrayBuffer);
 
-    // 4. Upload to Cloudinary
     const cleanId = facebookUrl 
       ? facebookUrl.replace(/https?:\/\/(www\.)?facebook\.com\//, '').replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now()
       : 'fb_profile_' + Date.now();
 
     const cloudinaryData = await uploadToCloudinary(finalBuffer, cleanId);
 
-    // 5. Return to n8n
     return NextResponse.json({
       success: true,
-      sourceUrl: facebookUrl,
+      originalDirtyUrl: rawFacebookUrl,
+      cleanedUrlUsed: facebookUrl,
       logoUrl: cloudinaryData.url, 
       colors: cloudinaryData.colors
     });
