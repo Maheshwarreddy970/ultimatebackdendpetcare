@@ -24,19 +24,14 @@ const APIFY_TOKENS = [
 let currentApifyIndex = 0;
 
 // ---------------------------------------------------------
-// HIGH-RES FACEBOOK URL CONVERTER (More Aggressive)
+// HIGH-RES FACEBOOK URL CONVERTER (Safe & Precise)
 // ---------------------------------------------------------
 function upgradeFacebookImageUrl(url: string): string {
   if (!url) return url;
-  let newUrl = url;
   
-  // 1. Force any size in query parameters to 1080x1080 (e.g., stp=dst-jpg_s200x200 -> 1080)
-  newUrl = newUrl.replace(/([smp]\d+x\d+)/g, 's1080x1080');
-  
-  // 2. Remove scaling directories hidden in the URL path itself (e.g., /s200x200/ -> /)
-  newUrl = newUrl.replace(/\/[a-z]\d+x\d+\//g, '/');
-
-  return newUrl;
+  // Safely targets ONLY the resolution numbers (e.g., changing 200x200 to 960x960).
+  // This perfectly matches your working URL structure and avoids breaking Facebook's security hashes.
+  return url.replace(/\d+x\d+/g, '960x960');
 }
 
 // ---------------------------------------------------------
@@ -56,12 +51,12 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
         if (error) return reject(error);
         if (!result) return reject(new Error("Upload failed"));
 
-        // 🔥 NEW TRANSFORMATIONS:
-        // w_600, h_600, c_fill, g_auto: Locks size to exactly 600x600, crops perfectly based on the subject's face/center.
-        // f_avif, q_auto:best: Delivers in AVIF format with the highest visual fidelity possible.
+        // 🔥 MAX QUALITY TRANSFORMATIONS:
+        // w_600, h_600, c_fill, g_auto: Locks size to exactly 600x600, crops perfectly based on the center.
+        // f_avif, q_100: Delivers in AVIF format with 100% UNCOMPRESSED quality.
         const optimizedUrl = result.secure_url.replace(
           '/upload/',
-          '/upload/w_600,h_600,c_fill,g_auto,f_avif,q_auto:best/'
+          '/upload/w_600,h_600,c_fill,g_auto,f_avif,q_100/'
         );
 
         let primary = null, secondary = null, tertiary = null;
@@ -169,7 +164,7 @@ export async function POST(req: Request) {
       rawImageUrl = await getProfilePicViaApify(facebookUrl);
     }
 
-    // 2. Transform low-res URL to crisp 1080x1080 resolution
+    // 2. Transform low-res URL to crisp 960x960 resolution safely
     const highResImageUrl = upgradeFacebookImageUrl(rawImageUrl);
     console.log("Upgraded Image URL:", highResImageUrl);
 
@@ -179,8 +174,6 @@ export async function POST(req: Request) {
       signal: AbortSignal.timeout(10000)
     });
 
-    // Sometimes removing path parameters breaks Facebook's signature hashes (403 Forbidden).
-    // If that happens, we safely fallback to the original image so it doesn't crash.
     if (!imageResponse.ok) {
       console.warn(`High-Res fetch failed (Status: ${imageResponse.status}), falling back to original resolution...`);
       imageResponse = await fetch(rawImageUrl, {
