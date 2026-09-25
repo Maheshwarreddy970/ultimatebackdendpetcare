@@ -24,7 +24,7 @@ const APIFY_TOKENS = [
 let currentApifyIndex = 0;
 
 // ---------------------------------------------------------
-// 1. BUILT-IN FACEBOOK URL CLEANER (Now handles /people/ & /pages/)
+// 1. BUILT-IN FACEBOOK URL CLEANER (Replaces n8n code node)
 // ---------------------------------------------------------
 function cleanFacebookUrl(rawUrl: string): string {
   if (!rawUrl || typeof rawUrl !== "string" || rawUrl.trim() === "") {
@@ -33,6 +33,7 @@ function cleanFacebookUrl(rawUrl: string): string {
 
   let currentUrl = rawUrl.trim();
 
+  // Add https:// if missing
   if (!currentUrl.startsWith("http")) {
     currentUrl = "https://" + currentUrl;
   }
@@ -40,29 +41,28 @@ function cleanFacebookUrl(rawUrl: string): string {
   try {
     const urlObj = new URL(currentUrl);
 
+    // Force standard www domain
     if (urlObj.hostname.includes("facebook.com")) {
       urlObj.hostname = "www.facebook.com";
     }
 
+    // Break URL into segments (e.g. /SpottedDogLC/reels -> ["SpottedDogLC", "reels"])
     const segments = urlObj.pathname.split("/").filter(Boolean);
 
     if (segments.length > 0) {
       if (segments[0] === "profile.php") {
+        // Keep the ?id= parameter for profile.php
         const profileId = urlObj.searchParams.get("id");
         return profileId ? `https://www.facebook.com/profile.php?id=${profileId}` : `https://www.facebook.com/`;
-      } 
-      // 🔥 FIX: Protect deep links like /people/name/id or /pages/name/id
-      else if (["people", "pages", "groups", "p"].includes(segments[0])) {
-        return `https://www.facebook.com/${segments.join('/')}`;
-      } 
-      // Standard vanity URLs (keeps only the username, drops /reels, etc.)
-      else {
+      } else {
+        // Grab ONLY the first segment, automatically dropping /reels, /about, etc.
         return `https://www.facebook.com/${segments[0]}`;
       }
     }
 
     return `https://www.facebook.com/`;
   } catch (error) {
+    // Fallback if URL is completely un-parsable
     return rawUrl;
   }
 }
@@ -72,6 +72,8 @@ function cleanFacebookUrl(rawUrl: string): string {
 // ---------------------------------------------------------
 function upgradeFacebookImageUrl(url: string): string {
   if (!url) return url;
+  // Safely targets ONLY the resolution numbers (e.g., changing 200x200 to 960x960).
+  // This preserves Facebook security signatures so it doesn't get blocked.
   return url.replace(/\d+x\d+/g, '960x960');
 }
 
@@ -86,12 +88,15 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
         folder: 'facebookurl',
         overwrite: true,
         resource_type: 'auto',
-        colors: true
+        colors: true // Extract primary, secondary, tertiary colors
       },
       (error: any, result: any) => {
         if (error) return reject(error);
         if (!result) return reject(new Error("Upload failed"));
 
+        // 🔥 MAX QUALITY TRANSFORMATIONS:
+        // w_600, h_600, c_fill, g_auto: Locks size to exactly 600x600, crops perfectly based on the center.
+        // f_avif, q_100: Delivers in AVIF format with 100% UNCOMPRESSED quality.
         const optimizedUrl = result.secure_url.replace(
           '/upload/',
           '/upload/w_600,h_600,c_fill,g_auto,f_avif,q_100/'
@@ -122,7 +127,7 @@ async function getProfilePicViaApify(facebookUrl: string): Promise<string> {
 
   while (attempts < APIFY_TOKENS.length) {
     const token = APIFY_TOKENS[currentApifyIndex];
-    console.log(`Trying Apify Token Index: ${currentApifyIndex} for URL: ${facebookUrl}`);
+    console.log(`Trying Apify Token Index: ${currentApifyIndex}`);
 
     try {
       const apifyClient = new ApifyClient({ token });
@@ -161,22 +166,29 @@ async function getProfilePicViaApify(facebookUrl: string): Promise<string> {
     } catch (error: any) {
       console.error(`Error with token ${currentApifyIndex}:`, error.message);
 
-      // 🔥 FIX: If the page is private/deleted, don't keep rotating tokens. Exit immediately.
-      if (error.message.includes("Apify returned empty items") || error.message.includes("valid string URL")) {
-        throw new Error("PRIVATE_OR_DELETED");
+      const isRateLimit = 
+        error?.message?.includes('429') || 
+        error?.http_code === 429 || 
+        error?.response?.status === 429 ||
+        error?.message?.toLowerCase().includes('unauthorized') ||
+        error?.message?.toLowerCase().includes('limit');
+
+      if (isRateLimit) {
+        console.warn(`Token ${currentApifyIndex} rate limited. Rotating...`);
+        currentApifyIndex = (currentApifyIndex + 1) % APIFY_TOKENS.length;
+        attempts++;
+        continue;
       }
 
-      console.warn(`Network drop or Rate Limit detected. Rotating Apify token...`);
-      currentApifyIndex = (currentApifyIndex + 1) % APIFY_TOKENS.length;
-      attempts++;
+      throw error;
     }
   }
 
-  throw new Error("All Apify tokens failed, timed out, or reached rate limits.");
+  throw new Error("All Apify tokens failed or rate limits exceeded.");
 }
 
 // ---------------------------------------------------------
-// 5. MAIN API ENDPOINT
+// 5. MAIN API ENDPOINT (For n8n)
 // ---------------------------------------------------------
 export async function POST(req: Request) {
   try {
@@ -188,6 +200,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Provide either facebookUrl or facebookImageUrl" }, { status: 400 });
     }
 
+    // -> THE URL IS NOW CLEANED AUTOMATICALLY BY NEXT.JS!
     const facebookUrl = cleanFacebookUrl(rawFacebookUrl);
 
     if (!rawImageUrl) {
@@ -198,29 +211,20 @@ export async function POST(req: Request) {
     const highResImageUrl = upgradeFacebookImageUrl(rawImageUrl);
     console.log("Upgraded Image URL:", highResImageUrl);
 
-    let imageResponse: Response | null = null;
+    let imageResponse = await fetch(highResImageUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(10000)
+    });
 
-    try {
-      imageResponse = await fetch(highResImageUrl, {
+    if (!imageResponse.ok) {
+      console.warn(`High-Res fetch failed (Status: ${imageResponse.status}), falling back to original resolution...`);
+      imageResponse = await fetch(rawImageUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(15000)
+        signal: AbortSignal.timeout(10000)
       });
-      if (!imageResponse.ok) throw new Error("Status not OK");
-    } catch (e) {
-      console.warn("High-Res fetch failed, falling back to original resolution...");
-      try {
-        imageResponse = await fetch(rawImageUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0' },
-          signal: AbortSignal.timeout(15000) 
-        });
-      } catch (fallbackErr: any) {
-        throw new Error(`Both high-res and original image downloads failed. Reason: ${fallbackErr.message}`);
-      }
     }
 
-    if (!imageResponse || !imageResponse.ok) {
-      throw new Error("Failed to download image from Facebook");
-    }
+    if (!imageResponse.ok) throw new Error("Failed to download image from Facebook");
 
     const arrayBuffer = await imageResponse.arrayBuffer();
     const finalBuffer = Buffer.from(arrayBuffer);
@@ -240,13 +244,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error("Endpoint Error:", error.message);
-    
-    // 🔥 FIX: Return a clean 404 for missing pages so n8n doesn't treat it as a server crash.
-    if (error.message === "PRIVATE_OR_DELETED") {
-      return NextResponse.json({ success: false, error: "Facebook profile is private, deleted, or invalid." }, { status: 404 });
-    }
-
+    console.error("Endpoint Error:", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
