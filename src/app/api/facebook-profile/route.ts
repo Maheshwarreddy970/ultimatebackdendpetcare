@@ -109,7 +109,7 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
 }
 
 // ---------------------------------------------------------
-// 4. APIFY SCRAPER WITH ROTATION
+// 4. BULLETPROOF APIFY SCRAPER WITH ROTATION
 // ---------------------------------------------------------
 async function getProfilePicViaApify(facebookUrl: string): Promise<string> {
   let attempts = 0;
@@ -155,25 +155,19 @@ async function getProfilePicViaApify(facebookUrl: string): Promise<string> {
     } catch (error: any) {
       console.error(`Error with token ${currentApifyIndex}:`, error.message);
 
-      const isRateLimit = 
-        error?.message?.includes('429') || 
-        error?.http_code === 429 || 
-        error?.response?.status === 429 ||
-        error?.message?.toLowerCase().includes('unauthorized') ||
-        error?.message?.toLowerCase().includes('limit');
-
-      if (isRateLimit) {
-        console.warn(`Token ${currentApifyIndex} rate limited. Rotating...`);
-        currentApifyIndex = (currentApifyIndex + 1) % APIFY_TOKENS.length;
-        attempts++;
-        continue;
+      // If the page is private/deleted, rotating tokens won't fix it. Stop trying.
+      if (error.message.includes("Apify returned empty items")) {
+        throw error;
       }
 
-      throw error;
+      // 🔥 FIX: For ANY other error (fetch failed, rate limit, timeout), rotate the token and try again.
+      console.warn(`Network drop or Rate Limit detected. Rotating Apify token...`);
+      currentApifyIndex = (currentApifyIndex + 1) % APIFY_TOKENS.length;
+      attempts++;
     }
   }
 
-  throw new Error("All Apify tokens failed or rate limits exceeded.");
+  throw new Error("All Apify tokens failed, timed out, or reached rate limits.");
 }
 
 // ---------------------------------------------------------
@@ -201,11 +195,10 @@ export async function POST(req: Request) {
 
     let imageResponse: Response | null = null;
 
-    // 🔥 FIX: Wrap image fetches in try...catch so network drops don't crash the API
     try {
       imageResponse = await fetch(highResImageUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(15000) // Increased to 15s
+        signal: AbortSignal.timeout(15000)
       });
       if (!imageResponse.ok) throw new Error("Status not OK");
     } catch (e) {
@@ -214,10 +207,10 @@ export async function POST(req: Request) {
       try {
         imageResponse = await fetch(rawImageUrl, {
           headers: { 'User-Agent': 'Mozilla/5.0' },
-          signal: AbortSignal.timeout(15000) // Increased to 15s
+          signal: AbortSignal.timeout(15000) 
         });
-      } catch (fallbackErr) {
-        throw new Error("Both high-res and original image downloads failed.");
+      } catch (fallbackErr: any) {
+        throw new Error(`Both high-res and original image downloads failed. Reason: ${fallbackErr.message}`);
       }
     }
 
