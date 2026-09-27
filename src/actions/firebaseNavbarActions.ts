@@ -1,7 +1,7 @@
 'use server';
 
 import { db } from '@/lib/firebase';
-import { collection, query, where, limit, getDocs, updateDoc, doc, deleteField } from 'firebase/firestore';
+import { collection, query, where, limit, getDocs, updateDoc, doc } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
 import { v2 as cloudinary } from 'cloudinary';
 import { removeBackground } from '@imgly/background-removal-node';
@@ -18,7 +18,7 @@ export async function getPendingLeads() {
   const snapshot = await getDocs(q);
   
   return snapshot.docs.map(doc => ({
-    id: doc.id, // The document ID (which is the email)
+    id: doc.id,
     ...doc.data()
   })) as any[];
 }
@@ -28,7 +28,7 @@ export async function updateFirebaseLogoStatus(docId: string, newStatus: string)
   try {
     const docRef = doc(db, "leads", docId);
     await updateDoc(docRef, { logoStatus: newStatus });
-    revalidatePath('/jsonnavcheck');
+    revalidatePath('/navcheck');
     return { success: true };
   } catch (error) {
     return { success: false, error: 'Failed to update status in Firebase' };
@@ -54,18 +54,30 @@ export async function uploadAndReplaceLogoFirebase(docId: string, formData: Form
     });
 
     const docRef = doc(db, "leads", docId);
-    await updateDoc(docRef, { logoUrl: cloudinaryUrl });
-    revalidatePath('/jsonnavcheck');
+    
+    // 🔥 FIX: We removed logoStatus: 'approved' so the card stays on the screen!
+    await updateDoc(docRef, { logoUrl: cloudinaryUrl }); 
+    
+    revalidatePath('/navcheck');
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message };
   }
 }
-
 // 3. Manual Background Removal
 export async function removeLogoBackgroundFirebase(docId: string, currentUrl: string) {
   try {
-    const response = await fetch(currentUrl);
+    console.log(`Starting BG removal for ${docId}...`);
+    
+    // 🔥 THE FIX: Just swap f_avif to f_png! This keeps the Cloudinary URL perfectly intact and gives the AI a readable format.
+    let safeUrl = currentUrl;
+    if (safeUrl.includes('f_avif')) {
+      safeUrl = safeUrl.replace('f_avif', 'f_png');
+    }
+
+    const response = await fetch(safeUrl, { cache: 'no-store' }); 
+    if (!response.ok) throw new Error("Failed to download image for background removal.");
+
     const originalBlob = await response.blob();
     const bgRemovedBlob = await removeBackground(originalBlob);
     
@@ -83,11 +95,13 @@ export async function removeLogoBackgroundFirebase(docId: string, currentUrl: st
       uploadStream.end(buffer);
     });
 
-    const docRef = doc(db, "leads", docId);
-    await updateDoc(docRef, { logoUrl: cloudinaryUrl });
-    revalidatePath('/jsonnavcheck');
+   const docRef = doc(db, "leads", docId);
+await updateDoc(docRef, { logoUrl: cloudinaryUrl }); // 🔥 REMOVED logoStatus: 'approved'
+revalidatePath('/navcheck');
+    
     return { success: true };
   } catch (error: any) {
+    console.error('BG Removal Error:', error);
     return { success: false, error: error.message };
   }
 }
@@ -95,7 +109,6 @@ export async function removeLogoBackgroundFirebase(docId: string, currentUrl: st
 // 4. Automated Engine
 export async function autoProcessNextSuccessRecordFirebase() {
   try {
-    // Just fetch ONE pending record to save Firebase read limits
     const q = query(collection(db, "leads"), where("logoStatus", "==", "pending"), limit(1));
     const snapshot = await getDocs(q);
 
@@ -108,15 +121,21 @@ export async function autoProcessNextSuccessRecordFirebase() {
     const docId = docSnapshot.id;
     const docRef = doc(db, "leads", docId);
 
-    // SCENARIO A: No image -> Mark as failed (to drop it out of 'pending' queue)
     if (!targetItem.logoUrl || targetItem.logoUrl.trim() === "") {
       await updateDoc(docRef, { logoStatus: "bg_failed" });
-      revalidatePath('/jsonnavcheck');
+      revalidatePath('/navcheck');
       return { status: 'processing', message: `Marked ${targetItem.FinalEmail} as Failed (No Image)` };
     }
 
-    // SCENARIO B: Remove Background & Approve
-    const response = await fetch(targetItem.logoUrl);
+    // 🔥 THE FIX: Applied to the automation engine as well
+    let safeUrl = targetItem.logoUrl;
+    if (safeUrl.includes('f_avif')) {
+      safeUrl = safeUrl.replace('f_avif', 'f_png');
+    }
+
+    const response = await fetch(safeUrl, { cache: 'no-store' });
+    if (!response.ok) throw new Error("Failed to download image for automated background removal.");
+    
     const originalBlob = await response.blob();
     const bgRemovedBlob = await removeBackground(originalBlob);
     
@@ -139,12 +158,64 @@ export async function autoProcessNextSuccessRecordFirebase() {
       logoStatus: 'approved'
     });
     
-    revalidatePath('/jsonnavcheck');
+    revalidatePath('/navcheck');
     return { status: 'processing', message: `✅ BG Removed & Approved: ${targetItem.FinalEmail}` };
 
   } catch (error: any) {
-    // If it crashes, mark it as bg_failed so the engine doesn't get stuck in an infinite loop
     console.error('Auto Process Error:', error);
     return { status: 'error', message: `Failed: ${error.message}` };
+  }
+}
+
+// 5. Revert/Undo Logo URL
+export async function updateFirebaseLogoUrl(docId: string, newUrl: string) {
+  try {
+    const docRef = doc(db, "leads", docId);
+    await updateDoc(docRef, { logoUrl: newUrl });
+    revalidatePath('/navcheck');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+
+
+// 6. Upload Custom Logo from External URL (Drag & Drop from another website)
+export async function uploadAndReplaceLogoFromUrlFirebase(docId: string, imageUrl: string) {
+  try {
+    // Fetch the image directly from the external website
+    const response = await fetch(imageUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(10000)
+    });
+    
+    if (!response.ok) throw new Error("Failed to fetch image from external URL");
+    
+    const blob = await response.blob();
+    const buffer = Buffer.from(await blob.arrayBuffer());
+    
+    const publicId = `custom_logo_${docId}_${Date.now()}`;
+    const cloudinaryUrl = await new Promise<string>((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { public_id: publicId, folder: 'logos', overwrite: true, resource_type: 'auto' },
+        (error, result) => {
+          if (error || !result) return reject(error);
+          resolve(result.secure_url.replace('/upload/', '/upload/f_avif,q_auto/'));
+        }
+      );
+      uploadStream.end(buffer);
+    });
+
+    const docRef = doc(db, "leads", docId);
+    
+    // 🔥 FIX: We removed logoStatus: 'approved' here too!
+    await updateDoc(docRef, { logoUrl: cloudinaryUrl }); 
+    
+    revalidatePath('/navcheck');
+    return { success: true };
+  } catch (error: any) {
+    console.error("URL Upload Error:", error);
+    return { success: false, error: error.message };
   }
 }
