@@ -8,18 +8,21 @@ import {
   updateFirebaseLogoUrl,
   uploadAndReplaceLogoFromUrlFirebase 
 } from '@/actions/firebaseNavbarActions';
-import { useRouter } from 'next/navigation'; 
 
-export default function JsonReviewButtons({ docId, currentStatus, currentUrl, onToggleBlack }: any) {
-  const router = useRouter(); 
+export default function JsonReviewButtons({ 
+  docId, 
+  currentStatus, 
+  currentUrl, 
+  onToggleBlack,
+  onProcessComplete // <-- NEW: Triggers the card to hide
+}: any) {
   const [loading, setLoading] = useState(false);
   const [isBlackBg, setIsBlackBg] = useState(false);
   const [originalUrlBackup, setOriginalUrlBackup] = useState<string | null>(null); 
   const [isDragging, setIsDragging] = useState(false); 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 🔥 NEW: Lightning-Fast Browser Image Optimizer
-  // Shrinks massive images down to <100kb before sending to the server
+  // Optimizer Function (Kept intact)
   const optimizeImage = async (file: File): Promise<File> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -29,11 +32,9 @@ export default function JsonReviewButtons({ docId, currentStatus, currentUrl, on
         img.src = event.target?.result as string;
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_SIZE = 800; // Max width or height
+          const MAX_SIZE = 800; 
           let width = img.width;
           let height = img.height;
-
-          // Maintain aspect ratio while shrinking
           if (width > height && width > MAX_SIZE) {
             height *= MAX_SIZE / width;
             width = MAX_SIZE;
@@ -41,22 +42,17 @@ export default function JsonReviewButtons({ docId, currentStatus, currentUrl, on
             width *= MAX_SIZE / height;
             height = MAX_SIZE;
           }
-
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
-
-          // Convert to highly compressed WebP format
           canvas.toBlob((blob) => {
             if (blob) {
-              resolve(new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".webp", { 
-                type: 'image/webp' 
-              }));
+              resolve(new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".webp", { type: 'image/webp' }));
             } else {
               reject(new Error("Canvas conversion failed"));
             }
-          }, 'image/webp', 0.85); // 85% quality
+          }, 'image/webp', 0.85); 
         };
         img.onerror = (err) => reject(err);
       };
@@ -66,6 +62,9 @@ export default function JsonReviewButtons({ docId, currentStatus, currentUrl, on
 
   const handleStatusChange = async (newStatus: string) => {
     setLoading(true);
+    // 1. Hide card instantly in UI (Zero read cost)
+    onProcessComplete(); 
+    // 2. Update database silently in the background
     await updateFirebaseLogoStatus(docId, newStatus);
   };
 
@@ -73,8 +72,7 @@ export default function JsonReviewButtons({ docId, currentStatus, currentUrl, on
     setLoading(true);
     setOriginalUrlBackup(currentUrl);
     await removeLogoBackgroundFirebase(docId, currentUrl);
-    router.refresh(); 
-    setLoading(false);
+    setLoading(false); // Notice no router.refresh()! We just stay on the card.
   };
 
   const handleUndoBg = async () => {
@@ -82,7 +80,6 @@ export default function JsonReviewButtons({ docId, currentStatus, currentUrl, on
     setLoading(true);
     await updateFirebaseLogoUrl(docId, originalUrlBackup);
     setOriginalUrlBackup(null);
-    router.refresh(); 
     setLoading(false);
   };
 
@@ -91,15 +88,11 @@ export default function JsonReviewButtons({ docId, currentStatus, currentUrl, on
     if (!file) return;
 
     setLoading(true);
-    
-    // Compress image before upload!
     const optimizedFile = await optimizeImage(file);
-    
     const formData = new FormData();
     formData.append('file', optimizedFile);
     await uploadAndReplaceLogoFirebase(docId, formData);
-    
-    router.refresh();
+    // The logo will visually update when you refresh, or you can just click Approve!
     setLoading(false);
   };
 
@@ -119,19 +112,16 @@ export default function JsonReviewButtons({ docId, currentStatus, currentUrl, on
     setLoading(true);
 
     try {
-      // 1. If dragging a real file from desktop
       const file = e.dataTransfer.files?.[0];
       if (file) {
-        const optimizedFile = await optimizeImage(file); // Compress dragged files too!
+        const optimizedFile = await optimizeImage(file); 
         const formData = new FormData();
         formData.append('file', optimizedFile);
         await uploadAndReplaceLogoFirebase(docId, formData);
-        router.refresh();
         setLoading(false);
         return;
       }
 
-      // 2. If dragging from another tab
       const html = e.dataTransfer.getData('text/html');
       const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
       let externalImageUrl = '';
@@ -150,8 +140,7 @@ export default function JsonReviewButtons({ docId, currentStatus, currentUrl, on
            const res = await fetch(externalImageUrl);
            const blob = await res.blob();
            const base64File = new File([blob], "dropped_image.png", { type: blob.type });
-           
-           const optimizedFile = await optimizeImage(base64File); // Compress base64 drop
+           const optimizedFile = await optimizeImage(base64File); 
            const formData = new FormData();
            formData.append('file', optimizedFile);
            await uploadAndReplaceLogoFirebase(docId, formData);
@@ -161,9 +150,6 @@ export default function JsonReviewButtons({ docId, currentStatus, currentUrl, on
            }
            await uploadAndReplaceLogoFromUrlFirebase(docId, externalImageUrl);
         }
-        router.refresh();
-      } else {
-        console.warn("Could not extract a valid image from the dropped item.");
       }
     } catch (err) {
       console.error("Drop handling error:", err);
@@ -203,11 +189,6 @@ export default function JsonReviewButtons({ docId, currentStatus, currentUrl, on
 
         <button onClick={() => fileInputRef.current?.click()} disabled={loading} className="px-4 py-2 bg-blue-600 text-white font-semibold rounded hover:bg-blue-700 group relative">
           {loading ? 'Processing...' : isDragging ? 'Drop Image Here!' : 'Upload Logo'}
-          {!isDragging && (
-            <span className="absolute -top-10 left-1/2 -translate-x-1/2 w-max bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none">
-              Click or Drag & Drop!
-            </span>
-          )}
         </button>
         <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
 

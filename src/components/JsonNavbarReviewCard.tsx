@@ -19,19 +19,21 @@ interface FirebaseLeadItem {
 
 export default function JsonNavbarReviewCard({ item }: { item: FirebaseLeadItem }) {
   const [isBlack, setIsBlack] = useState(false);
+  
+  // 🔥 OPTIMIZATION: Local state to hide the card instantly without asking Firebase for new data
+  const [isVisible, setIsVisible] = useState(true);
 
-  if (!item) return null;
+  if (!item || !isVisible) return null;
 
   const displayLogo = item.logoUrl && item.logoUrl.trim() !== "" 
     ? item.logoUrl 
     : "https://upload.wikimedia.org/wikipedia/commons/3/3f/Placeholder_view_vector.svg"; 
 
-  // Intelligently find the best Facebook and Instagram links from your database fields
   const fbLink = item.Facebook || item.facebookurl || item.aifacebook || item["extracted facebook"] || "";
   const igLink = item.Instagram || "";
 
   return (
-    <div className="w-full relative flex flex-col min-h-[200px] border border-gray-300 rounded-lg overflow-hidden shadow-sm">
+    <div className="w-full relative flex flex-col min-h-[200px] border border-gray-300 rounded-lg overflow-hidden shadow-sm transition-all duration-300 ease-in-out">
       <img
         src="/homeimage.avif"
         className="w-full h-full object-cover absolute top-0 left-0 z-0 inset-0"
@@ -40,7 +42,6 @@ export default function JsonNavbarReviewCard({ item }: { item: FirebaseLeadItem 
 
       <div className="relative z-10 w-full flex flex-col justify-between h-full bg-black/10 backdrop-blur-sm">
         <div className={isBlack ? 'brightness-0' : ''}>
-          {/* Feed the social links to the Navbar */}
           <Navbar logoUrl={displayLogo} url={item.Website || ""} fbLink={fbLink} igLink={igLink} />
         </div>
         
@@ -49,6 +50,8 @@ export default function JsonNavbarReviewCard({ item }: { item: FirebaseLeadItem 
           currentStatus={item.logoStatus}
           currentUrl={item.logoUrl || ""} 
           onToggleBlack={setIsBlack}
+          // Pass a function to hide the card immediately
+          onProcessComplete={() => setIsVisible(false)} 
         />
       </div>
     </div>

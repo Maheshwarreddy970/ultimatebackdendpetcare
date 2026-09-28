@@ -2,7 +2,6 @@
 
 import { db } from '@/lib/firebase';
 import { collection, query, where, limit, getDocs, updateDoc, doc } from 'firebase/firestore';
-import { revalidatePath } from 'next/cache';
 import { v2 as cloudinary } from 'cloudinary';
 import { removeBackground } from '@imgly/background-removal-node';
 
@@ -28,7 +27,7 @@ export async function updateFirebaseLogoStatus(docId: string, newStatus: string)
   try {
     const docRef = doc(db, "leads", docId);
     await updateDoc(docRef, { logoStatus: newStatus });
-    revalidatePath('/navcheck');
+    
     return { success: true };
   } catch (error) {
     return { success: false, error: 'Failed to update status in Firebase' };
@@ -58,7 +57,7 @@ export async function uploadAndReplaceLogoFirebase(docId: string, formData: Form
     // 🔥 FIX: We removed logoStatus: 'approved' so the card stays on the screen!
     await updateDoc(docRef, { logoUrl: cloudinaryUrl }); 
     
-    revalidatePath('/navcheck');
+    
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message };
@@ -97,7 +96,7 @@ export async function removeLogoBackgroundFirebase(docId: string, currentUrl: st
 
    const docRef = doc(db, "leads", docId);
 await updateDoc(docRef, { logoUrl: cloudinaryUrl }); // 🔥 REMOVED logoStatus: 'approved'
-revalidatePath('/navcheck');
+
     
     return { success: true };
   } catch (error: any) {
@@ -123,7 +122,7 @@ export async function autoProcessNextSuccessRecordFirebase() {
 
     if (!targetItem.logoUrl || targetItem.logoUrl.trim() === "") {
       await updateDoc(docRef, { logoStatus: "bg_failed" });
-      revalidatePath('/navcheck');
+      
       return { status: 'processing', message: `Marked ${targetItem.FinalEmail} as Failed (No Image)` };
     }
 
@@ -158,7 +157,7 @@ export async function autoProcessNextSuccessRecordFirebase() {
       logoStatus: 'approved'
     });
     
-    revalidatePath('/navcheck');
+    
     return { status: 'processing', message: `✅ BG Removed & Approved: ${targetItem.FinalEmail}` };
 
   } catch (error: any) {
@@ -172,7 +171,7 @@ export async function updateFirebaseLogoUrl(docId: string, newUrl: string) {
   try {
     const docRef = doc(db, "leads", docId);
     await updateDoc(docRef, { logoUrl: newUrl });
-    revalidatePath('/navcheck');
+    
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message };
@@ -212,7 +211,7 @@ export async function uploadAndReplaceLogoFromUrlFirebase(docId: string, imageUr
     // 🔥 FIX: We removed logoStatus: 'approved' here too!
     await updateDoc(docRef, { logoUrl: cloudinaryUrl }); 
     
-    revalidatePath('/navcheck');
+    
     return { success: true };
   } catch (error: any) {
     console.error("URL Upload Error:", error);
