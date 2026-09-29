@@ -5,7 +5,7 @@ import { ApifyClient } from 'apify-client';
 import sharp from 'sharp';
 
 // ---------------------------------------------------------
-// CLOUDINARY CONFIG
+// NEW CLOUDINARY CONFIG
 // ---------------------------------------------------------
 cloudinary.config({
   cloud_name: 'ta5klglv',
@@ -27,7 +27,8 @@ let currentApifyIndex = 0;
 const BANNED_KEYWORDS = ['facebook', 'instagram', 'twitter', 'linkedin', 'tiktok', 'youtube', 'pinterest', 'google', 'placeholder', 'spinner', 'flag'];
 
 // ---------------------------------------------------------
-// 1. THE "MAGIC WAND" PIXEL PROCESSOR (FIXED WHITE BG BUG)
+// 1. THE "MAGIC WAND" PIXEL PROCESSOR 
+// (ALREADY HANDLES TRANSPARENT LOGOS PERFECTLY)
 // ---------------------------------------------------------
 async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, type: 'transparent' | 'bg_removed' | 'photo' }> {
   try {
@@ -51,6 +52,7 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
     const bl = getPixel(insetX, height - insetY - 1);
     const br = getPixel(width - insetX - 1, height - insetY - 1);
 
+    // If the image is ALREADY transparent, we skip BG removal!
     if (tl[3] < 10 && tr[3] < 10 && bl[3] < 10 && br[3] < 10) {
       return { buffer, type: 'transparent' };
     }
@@ -115,12 +117,14 @@ async function generateTextLogo(name: string): Promise<Buffer> {
 }
 
 // ---------------------------------------------------------
-// 4. INTELLIGENT WEBSITE SCRAPER
+// 4. INTELLIGENT WEBSITE SCRAPER (WITH VUE/WEEBLY FIX)
 // ---------------------------------------------------------
 async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Promise<string | null> {
   try {
     let secureUrl = websiteUrl;
-    if (!websiteUrl.startsWith('http')) secureUrl = `https://${websiteUrl}`;
+    if (!websiteUrl.startsWith('http')) {
+      secureUrl = `https://${websiteUrl}`;
+    }
 
     const response = await fetch(secureUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
@@ -141,15 +145,18 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
     const $ = cheerio.load(html);
     let logoUrl: string | null = null;
 
-    const getBestImageSrc = (imgEl: any): string | null => {
-      const widthStr = $(imgEl).attr('width');
+    const getBestImageSrc = (el: any): string | null => {
+      const widthStr = $(el).attr('width');
       if (widthStr) {
         const w = parseInt(widthStr);
         if (w <= 40) return null;
       }
 
-      let src = $(imgEl).attr('data-src');
-      if (!src) src = $(imgEl).attr('src');
+      let src = $(el).attr('data-src');
+      if (!src) src = $(el).attr('src');
+      // 🔥 FIX: Check 'original' attribute for Vue/Weebly sites
+      if (!src) src = $(el).attr('original'); 
+      if (!src) src = $(el).attr('data-original');
 
       let isDataImage = false;
       if (src) {
@@ -159,14 +166,15 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       }
 
       if (isDataImage) {
-        let srcset = $(imgEl).attr('srcset');
-        if (!srcset) srcset = $(imgEl).attr('data-srcset');
+        let srcset = $(el).attr('srcset');
+        if (!srcset) srcset = $(el).attr('data-srcset');
         if (srcset) src = srcset.split(',')[0].trim().split(' ')[0];
       }
 
       if (src) {
         if (src.startsWith('data:image')) return null;
-        return src;
+        // 🔥 FIX: Encode spaces so fetch() doesn't crash with TypeError: Invalid URL
+        return src.replace(/ /g, '%20');
       }
       return null;
     };
@@ -185,7 +193,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       return true;
     };
 
-    // TARGET: Moego Background Images
+    // Target 1: Background Images (Moego, etc)
     $('[style*="background-image"]').each((_, el) => {
       let style = $(el).attr('style');
       if (style) {
@@ -202,7 +210,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
     });
     if (logoUrl) return resolveUrl(logoUrl, secureUrl);
 
-    // TARGET: Google Sites & Specific platforms
+    // Target 2: Google Sites & Groomer.io
     if (domain.includes('sites.google.com')) {
       $('.lzy1Td').each((_, el) => {
         const src = getBestImageSrc(el);
@@ -219,58 +227,48 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       if (logoUrl) return resolveUrl(logoUrl, secureUrl);
     }
 
-    // TARGET: Specialized Square & Ueni Classes
-    const targetedSelectors = [
-      'img[id="header-logo"]',
-      'img[data-testid="venue-logo-image"]',
-      'img[src*="seller-brand-assets"]',
-      'a[href*="/appointments/"] img'
-    ];
-    for (let i = 0; i < targetedSelectors.length; i++) {
-      $(targetedSelectors[i]).each((_, img) => {
-        const src = getBestImageSrc(img);
-        if (isValidLogo(src)) { logoUrl = src; return false; }
-      });
-      if (logoUrl) break;
-    }
-    if (logoUrl) return resolveUrl(logoUrl, secureUrl);
-
-    // TARGET: Standard Patterns
-    $('img').each((_, img) => {
-      let alt = $(img).attr('alt');
+    // Target 3: MASSIVE LOGO SEARCH (Checks all elements, not just imgs)
+    $('*').each((_, el) => {
+      let alt = $(el).attr('alt');
       if (!alt) alt = '';
       
-      let className = $(img).attr('class');
+      let className = $(el).attr('class');
       if (!className) className = '';
       
-      let id = $(img).attr('id');
+      let id = $(el).attr('id');
       if (!id) id = '';
       
-      if (alt.toLowerCase().includes('logo')) {
-        const src = getBestImageSrc(img);
-        if (isValidLogo(src)) { logoUrl = src; return false; }
-      } else if (className.toLowerCase().includes('logo')) {
-        const src = getBestImageSrc(img);
-        if (isValidLogo(src)) { logoUrl = src; return false; }
-      } else if (id.toLowerCase().includes('logo')) {
-        const src = getBestImageSrc(img);
-        if (isValidLogo(src)) { logoUrl = src; return false; }
+      let isLogoEl = false;
+      if (alt.toLowerCase().includes('logo')) isLogoEl = true;
+      else if (className.toLowerCase().includes('logo')) isLogoEl = true;
+      else if (id.toLowerCase().includes('logo')) isLogoEl = true;
+      
+      if (isLogoEl) {
+        let src = getBestImageSrc(el);
+        
+        // If the <a> or <div> doesn't have the source, check its child <img>
+        if (!src) {
+          const childImg = $(el).find('img').first();
+          if (childImg.length > 0) {
+            src = getBestImageSrc(childImg[0]);
+          }
+        }
+
+        if (isValidLogo(src)) {
+          logoUrl = src;
+          return false; // Break the loop
+        }
       }
     });
+
     if (logoUrl) return resolveUrl(logoUrl, secureUrl);
 
-    // TARGET: Home Links
+    // Target 4: Home Links Fallback
     $('a').each((_, a) => {
       let href = $(a).attr('href');
       if (!href) href = '';
       
-      if (href === '/') {
-        const img = $(a).find('img').first();
-        if (img.length > 0) {
-          const src = getBestImageSrc(img[0]);
-          if (isValidLogo(src)) { logoUrl = src; return false; }
-        }
-      } else if (href.includes(domain)) {
+      if (href === '/' || href.includes(domain)) {
         const img = $(a).find('img').first();
         if (img.length > 0) {
           const src = getBestImageSrc(img[0]);
@@ -303,7 +301,6 @@ function cleanFacebookUrl(rawUrl: string): string {
   
   let currentUrl = rawUrl.trim();
   
-  // FIX: Detect multiple Facebook comma-separated URLs and only take the first!
   if (currentUrl.includes(',')) {
     currentUrl = currentUrl.split(',')[0].trim();
   }
@@ -372,16 +369,20 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
   if (rawImageUrl) {
     const highResUrl = rawImageUrl.replace(/\d+x\d+/g, '960x960');
     let imgRes = await fetch(highResUrl);
-    if (!imgRes.ok) imgRes = await fetch(rawImageUrl);
-    if (imgRes.ok) return Buffer.from(await imgRes.arrayBuffer());
+    if (!imgRes.ok) {
+      imgRes = await fetch(rawImageUrl);
+    }
+    if (imgRes.ok) {
+      return Buffer.from(await imgRes.arrayBuffer());
+    }
   }
   return null;
 }
 
 // ---------------------------------------------------------
-// CLOUDINARY FINAL UPLOAD
+// CLOUDINARY FINAL UPLOAD 
 // ---------------------------------------------------------
-async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any> {
+async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       { public_id: publicId, folder: 'logos', overwrite: true, resource_type: 'auto', colors: true },
@@ -389,6 +390,14 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
         if (error) return reject(error);
         if (!result) return reject(new Error("No result from Cloudinary"));
 
+        let transform = 'b_transparent,w_600,h_600,c_pad,g_auto,f_avif,q_auto:best';
+        
+        if (imageType !== 'photo') {
+          transform = `e_make_transparent:15,` + transform;
+        }
+
+        const optimizedUrl = result.secure_url.replace('/upload/', `/upload/${transform}/`);
+        
         let primary = null, secondary = null, tertiary = null;
         if (result.colors) {
           if (result.colors.length > 0) {
@@ -397,19 +406,20 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
             if (result.colors[2]) tertiary = result.colors[2][0];
           }
         }
-        resolve({ url: result.secure_url, colors: { primary, secondary, tertiary } });
+        resolve({ url: optimizedUrl, colors: { primary, secondary, tertiary } });
       }
     );
     uploadStream.end(buffer);
   });
 }
 
-// Helper to determine if a logo is a bad generic placeholder based on Cloudinary extracted colors
 function isBadColors(p: string | null, s: string | null, t: string | null): boolean {
   if (!p) return false;
   const primary = p.toUpperCase();
-  const secondary = s ? s.toUpperCase() : "";
-  const tertiary = t ? t.toUpperCase() : "";
+  let secondary = "";
+  if (s) secondary = s.toUpperCase();
+  let tertiary = "";
+  if (t) tertiary = t.toUpperCase();
 
   if (primary === "#101928" && secondary === "#FFFFFF") return true; 
   if (primary === "#0987C5" && secondary === "#FFFFFE" && tertiary === "#EFFBFD") return true; 
@@ -440,7 +450,6 @@ export async function POST(req: Request) {
     let finalType = 'none';
     let source = 'none';
 
-    // Core helper to Process -> Crop/Erase -> Upload
     const processAndUpload = async (buffer: Buffer) => {
       const { buffer: processedBuffer, type } = await processImagePixels(buffer);
       let finalBuffer = processedBuffer;
@@ -448,7 +457,7 @@ export async function POST(req: Request) {
         finalBuffer = await cropToCircle(processedBuffer);
       }
       const cleanId = `logo_${Date.now()}`;
-      const cData = await uploadToCloudinary(finalBuffer, cleanId);
+      const cData = await uploadToCloudinary(finalBuffer, cleanId, type);
       return { cData, type };
     };
 
@@ -469,13 +478,10 @@ export async function POST(req: Request) {
             const buffer = Buffer.from(await imgRes.arrayBuffer());
             const result = await processAndUpload(buffer);
             
-            // 🔥 MOEGO / RYMAPS COLOR DETECTOR: If this website gave us a bad generic placeholder, reject it!
             if (!isBadColors(result.cData.colors.primary, result.cData.colors.secondary, result.cData.colors.tertiary)) {
                finalCloudinaryData = result.cData;
                source = 'website';
                finalType = result.type;
-            } else {
-               console.log("Detected generic placeholder colors. Falling back to Facebook.");
             }
           }
         }
