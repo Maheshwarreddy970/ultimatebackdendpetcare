@@ -5,7 +5,7 @@ import { ApifyClient } from 'apify-client';
 import sharp from 'sharp';
 
 // ---------------------------------------------------------
-// NEW CLOUDINARY CONFIG
+// CLOUDINARY CONFIG
 // ---------------------------------------------------------
 cloudinary.config({
   cloud_name: 'ta5klglv',
@@ -120,9 +120,7 @@ async function generateTextLogo(name: string): Promise<Buffer> {
 async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Promise<string | null> {
   try {
     let secureUrl = websiteUrl;
-    if (!websiteUrl.startsWith('http')) {
-      secureUrl = `https://${websiteUrl}`;
-    }
+    if (!websiteUrl.startsWith('http')) secureUrl = `https://${websiteUrl}`;
 
     const response = await fetch(secureUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
@@ -187,6 +185,24 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       return true;
     };
 
+    // TARGET: Moego Background Images
+    $('[style*="background-image"]').each((_, el) => {
+      let style = $(el).attr('style');
+      if (style) {
+        let match = style.match(/background-image:\s*url\s*\(\s*(.*?)\s*\)/i);
+        if (match) {
+          if (match[1]) {
+            let src = match[1].replace(/&quot;/g, '').replace(/^['"]/, '').replace(/['"]$/, '');
+            if (isValidLogo(src)) {
+              if (domain.includes('moego')) { logoUrl = src; return false; }
+            }
+          }
+        }
+      }
+    });
+    if (logoUrl) return resolveUrl(logoUrl, secureUrl);
+
+    // TARGET: Google Sites & Specific platforms
     if (domain.includes('sites.google.com')) {
       $('.lzy1Td').each((_, el) => {
         const src = getBestImageSrc(el);
@@ -203,6 +219,23 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       if (logoUrl) return resolveUrl(logoUrl, secureUrl);
     }
 
+    // TARGET: Specialized Square & Ueni Classes
+    const targetedSelectors = [
+      'img[id="header-logo"]',
+      'img[data-testid="venue-logo-image"]',
+      'img[src*="seller-brand-assets"]',
+      'a[href*="/appointments/"] img'
+    ];
+    for (let i = 0; i < targetedSelectors.length; i++) {
+      $(targetedSelectors[i]).each((_, img) => {
+        const src = getBestImageSrc(img);
+        if (isValidLogo(src)) { logoUrl = src; return false; }
+      });
+      if (logoUrl) break;
+    }
+    if (logoUrl) return resolveUrl(logoUrl, secureUrl);
+
+    // TARGET: Standard Patterns
     $('img').each((_, img) => {
       let alt = $(img).attr('alt');
       if (!alt) alt = '';
@@ -224,9 +257,9 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
         if (isValidLogo(src)) { logoUrl = src; return false; }
       }
     });
-
     if (logoUrl) return resolveUrl(logoUrl, secureUrl);
 
+    // TARGET: Home Links
     $('a').each((_, a) => {
       let href = $(a).attr('href');
       if (!href) href = '';
@@ -269,6 +302,12 @@ function cleanFacebookUrl(rawUrl: string): string {
   if (rawUrl.trim() === "") return "";
   
   let currentUrl = rawUrl.trim();
+  
+  // FIX: Detect multiple Facebook comma-separated URLs and only take the first!
+  if (currentUrl.includes(',')) {
+    currentUrl = currentUrl.split(',')[0].trim();
+  }
+
   if (!currentUrl.startsWith("http")) currentUrl = "https://" + currentUrl;
   try {
     const urlObj = new URL(currentUrl);
@@ -333,20 +372,16 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
   if (rawImageUrl) {
     const highResUrl = rawImageUrl.replace(/\d+x\d+/g, '960x960');
     let imgRes = await fetch(highResUrl);
-    if (!imgRes.ok) {
-      imgRes = await fetch(rawImageUrl);
-    }
-    if (imgRes.ok) {
-      return Buffer.from(await imgRes.arrayBuffer());
-    }
+    if (!imgRes.ok) imgRes = await fetch(rawImageUrl);
+    if (imgRes.ok) return Buffer.from(await imgRes.arrayBuffer());
   }
   return null;
 }
 
 // ---------------------------------------------------------
-// CLOUDINARY FINAL UPLOAD (CLEAN URL RETURN)
+// CLOUDINARY FINAL UPLOAD
 // ---------------------------------------------------------
-async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: string): Promise<any> {
+async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       { public_id: publicId, folder: 'logos', overwrite: true, resource_type: 'auto', colors: true },
@@ -362,13 +397,26 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: s
             if (result.colors[2]) tertiary = result.colors[2][0];
           }
         }
-        
-        // 🔥 Return the clean, public URL requested
         resolve({ url: result.secure_url, colors: { primary, secondary, tertiary } });
       }
     );
     uploadStream.end(buffer);
   });
+}
+
+// Helper to determine if a logo is a bad generic placeholder based on Cloudinary extracted colors
+function isBadColors(p: string | null, s: string | null, t: string | null): boolean {
+  if (!p) return false;
+  const primary = p.toUpperCase();
+  const secondary = s ? s.toUpperCase() : "";
+  const tertiary = t ? t.toUpperCase() : "";
+
+  if (primary === "#101928" && secondary === "#FFFFFF") return true; 
+  if (primary === "#0987C5" && secondary === "#FFFFFE" && tertiary === "#EFFBFD") return true; 
+  if (primary === "#000000" && secondary === "#000000") return true; 
+  if (primary === "#FFFFFF" && secondary === "") return true; 
+  
+  return false;
 }
 
 // ---------------------------------------------------------
@@ -388,74 +436,82 @@ export async function POST(req: Request) {
     if (!businessName) businessName = lead.facebookname;
     if (!businessName) businessName = "Pet Grooming";
 
-    let imageBuffer: Buffer | null = null;
+    let finalCloudinaryData: any = null;
+    let finalType = 'none';
     let source = 'none';
+
+    // Core helper to Process -> Crop/Erase -> Upload
+    const processAndUpload = async (buffer: Buffer) => {
+      const { buffer: processedBuffer, type } = await processImagePixels(buffer);
+      let finalBuffer = processedBuffer;
+      if (type === 'photo') {
+        finalBuffer = await cropToCircle(processedBuffer);
+      }
+      const cleanId = `logo_${Date.now()}`;
+      const cData = await uploadToCloudinary(finalBuffer, cleanId);
+      return { cData, type };
+    };
 
     // 1. Try Website Extraction
     if (websiteUrl) {
       if (websiteUrl.trim() !== '') {
         let secureDomain = websiteUrl;
-        if (!secureDomain.startsWith('http')) {
-          secureDomain = `https://${websiteUrl}`;
-        }
+        if (!secureDomain.startsWith('http')) secureDomain = `https://${websiteUrl}`;
         const urlObj = new URL(secureDomain);
         let domain = urlObj.hostname;
-        if (domain.startsWith('www.')) {
-          domain = domain.substring(4);
-        }
+        if (domain.startsWith('www.')) domain = domain.substring(4);
 
         const extractedUrl = await extractLogoUrlFromWebsite(websiteUrl, domain);
         
         if (extractedUrl) {
           const imgRes = await fetch(extractedUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
           if (imgRes.ok) {
-            imageBuffer = Buffer.from(await imgRes.arrayBuffer());
-            source = 'website';
+            const buffer = Buffer.from(await imgRes.arrayBuffer());
+            const result = await processAndUpload(buffer);
+            
+            // 🔥 MOEGO / RYMAPS COLOR DETECTOR: If this website gave us a bad generic placeholder, reject it!
+            if (!isBadColors(result.cData.colors.primary, result.cData.colors.secondary, result.cData.colors.tertiary)) {
+               finalCloudinaryData = result.cData;
+               source = 'website';
+               finalType = result.type;
+            } else {
+               console.log("Detected generic placeholder colors. Falling back to Facebook.");
+            }
           }
         }
       }
     }
 
     // 2. Try Facebook Fallback
-    if (!imageBuffer) {
+    if (!finalCloudinaryData) {
       if (fbUrl) {
         if (fbUrl.trim() !== '') {
-          imageBuffer = await scrapeFacebookPic(fbUrl);
-          if (imageBuffer) {
+          const fbBuffer = await scrapeFacebookPic(fbUrl);
+          if (fbBuffer) {
+            const result = await processAndUpload(fbBuffer);
+            finalCloudinaryData = result.cData;
             source = 'facebook';
+            finalType = result.type;
           }
         }
       }
     }
 
     // 3. Text Logo Fallback
-    if (!imageBuffer) {
-      imageBuffer = await generateTextLogo(businessName);
+    if (!finalCloudinaryData) {
+      const txtBuffer = await generateTextLogo(businessName);
+      const result = await processAndUpload(txtBuffer);
+      finalCloudinaryData = result.cData;
       source = 'text';
+      finalType = result.type;
     }
-
-    // 4. Pixel Processing Engine
-    if (!imageBuffer) {
-      return NextResponse.json({ success: false, error: "Complete Failure" }, { status: 500 });
-    }
-
-    const { buffer: processedBuffer, type } = await processImagePixels(imageBuffer);
-    let finalBuffer = processedBuffer;
-
-    if (type === 'photo') {
-      finalBuffer = await cropToCircle(processedBuffer);
-    }
-
-    // 5. Upload to Cloudinary
-    const cleanId = `logo_${Date.now()}`;
-    const cloudinaryData = await uploadToCloudinary(finalBuffer, cleanId, type);
 
     return NextResponse.json({
       success: true,
       sourceUsed: source,
-      processingResult: type,
-      logoUrl: cloudinaryData.url,
-      colors: cloudinaryData.colors
+      processingResult: finalType,
+      logoUrl: finalCloudinaryData.url,
+      colors: finalCloudinaryData.colors
     });
 
   } catch (error: any) {
