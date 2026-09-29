@@ -6,6 +6,7 @@ import JsonReviewButtons from '@/components/JsonReviewButtons';
 
 interface FirebaseLeadItem {
   id: string; 
+  Name?: string;
   Website: string;
   logoUrl?: string; 
   logoStatus: string;
@@ -13,24 +14,28 @@ interface FirebaseLeadItem {
   facebookurl?: string;
   aifacebook?: string;
   "extracted facebook"?: string;
+  facebookname?: string;
   Instagram?: string;
   [key: string]: any;
 }
 
 export default function JsonNavbarReviewCard({ item }: { item: FirebaseLeadItem }) {
   const [isBlack, setIsBlack] = useState(false);
-  
-  // 🔥 OPTIMIZATION: Local state to hide the card instantly without asking Firebase for new data
   const [isVisible, setIsVisible] = useState(true);
+  
+  const [localLogoUrl, setLocalLogoUrl] = useState(item.logoUrl || "");
 
   if (!item || !isVisible) return null;
 
-  const displayLogo = item.logoUrl && item.logoUrl.trim() !== "" 
-    ? item.logoUrl 
+  const displayLogo = localLogoUrl.trim() !== "" 
+    ? localLogoUrl 
     : "https://upload.wikimedia.org/wikipedia/commons/3/3f/Placeholder_view_vector.svg"; 
 
   const fbLink = item.Facebook || item.facebookurl || item.aifacebook || item["extracted facebook"] || "";
   const igLink = item.Instagram || "";
+  
+  // Extract the best available business name for the "Use Text" generator
+  const businessName = item.Name || item.facebookname || "Pet Grooming";
 
   return (
     <div className="w-full relative flex flex-col min-h-[200px] border border-gray-300 rounded-lg overflow-hidden shadow-sm transition-all duration-300 ease-in-out">
@@ -47,11 +52,12 @@ export default function JsonNavbarReviewCard({ item }: { item: FirebaseLeadItem 
         
         <JsonReviewButtons
           docId={item.id} 
+          businessName={businessName} // <-- PASSED TO BUTTONS
           currentStatus={item.logoStatus}
-          currentUrl={item.logoUrl || ""} 
+          currentUrl={localLogoUrl} 
           onToggleBlack={setIsBlack}
-          // Pass a function to hide the card immediately
           onProcessComplete={() => setIsVisible(false)} 
+          onUpdateLogo={(newUrl: string) => setLocalLogoUrl(newUrl)} 
         />
       </div>
     </div>
