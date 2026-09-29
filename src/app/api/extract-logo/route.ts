@@ -5,7 +5,7 @@ import { ApifyClient } from 'apify-client';
 import sharp from 'sharp';
 
 // ---------------------------------------------------------
-// NEW CLOUDINARY CONFIG
+// CLOUDINARY CONFIG
 // ---------------------------------------------------------
 cloudinary.config({
   cloud_name: 'ta5klglv',
@@ -28,7 +28,6 @@ const BANNED_KEYWORDS = ['facebook', 'instagram', 'twitter', 'linkedin', 'tiktok
 
 // ---------------------------------------------------------
 // 1. THE "MAGIC WAND" PIXEL PROCESSOR 
-// (ALREADY HANDLES TRANSPARENT LOGOS PERFECTLY)
 // ---------------------------------------------------------
 async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, type: 'transparent' | 'bg_removed' | 'photo' }> {
   try {
@@ -52,28 +51,66 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
     const bl = getPixel(insetX, height - insetY - 1);
     const br = getPixel(width - insetX - 1, height - insetY - 1);
 
-    // If the image is ALREADY transparent, we skip BG removal!
-    if (tl[3] < 10 && tr[3] < 10 && bl[3] < 10 && br[3] < 10) {
+    // 🔥 THE FIX: If ANY corner is already transparent (Alpha < 250), it is a Transparent Logo!
+    let isAlreadyTransparent = false;
+    if (tl[3] < 250) isAlreadyTransparent = true;
+    if (tr[3] < 250) isAlreadyTransparent = true;
+    if (bl[3] < 250) isAlreadyTransparent = true;
+    if (br[3] < 250) isAlreadyTransparent = true;
+
+    if (isAlreadyTransparent) {
       return { buffer, type: 'transparent' };
     }
 
+    // It is fully opaque. Check if the 4 corners match exactly.
     const colorDist = (c1: number[], c2: number[]) => 
       Math.abs(c1[0] - c2[0]) + Math.abs(c1[1] - c2[1]) + Math.abs(c1[2] - c2[2]);
 
-    if (colorDist(tl, tr) < 30 && colorDist(tl, bl) < 30 && colorDist(tl, br) < 30) {
-      const bgColor = tl;
-      const tolerance = 45;
-      
-      const newData = Buffer.from(data);
-      for (let i = 0; i < newData.length; i += 4) {
-        const dist = Math.abs(newData[i] - bgColor[0]) + Math.abs(newData[i + 1] - bgColor[1]) + Math.abs(newData[i + 2] - bgColor[2]);
-        if (dist <= tolerance) {
-          newData[i + 3] = 0; 
+    let cornersMatch = false;
+    if (colorDist(tl, tr) < 30) {
+      if (colorDist(tl, bl) < 30) {
+        if (colorDist(tl, br) < 30) {
+          cornersMatch = true;
+        }
+      }
+    }
+
+    if (cornersMatch) {
+      const r = tl[0];
+      const g = tl[1];
+      const b = tl[2];
+
+      // Detect if the solid background is White or Black
+      let isWhite = false;
+      if (r > 230) {
+        if (g > 230) {
+          if (b > 230) isWhite = true;
         }
       }
 
-      const transparentBuffer = await sharp(newData, { raw: { width, height, channels: 4 } }).png().toBuffer();
-      return { buffer: transparentBuffer, type: 'bg_removed' };
+      let isBlack = false;
+      if (r < 25) {
+        if (g < 25) {
+          if (b < 25) isBlack = true;
+        }
+      }
+
+      // Only erase the background if it is White or Black.
+      // If it's a weird color, we treat it as a photo and crop it into a circle!
+      if (isWhite || isBlack) {
+        const bgColor = tl;
+        const tolerance = 45; 
+        const newData = Buffer.from(data);
+        
+        for (let i = 0; i < newData.length; i += 4) {
+          const dist = Math.abs(newData[i] - bgColor[0]) + Math.abs(newData[i + 1] - bgColor[1]) + Math.abs(newData[i + 2] - bgColor[2]);
+          if (dist <= tolerance) {
+            newData[i + 3] = 0; 
+          }
+        }
+        const transparentBuffer = await sharp(newData, { raw: { width, height, channels: 4 } }).png().toBuffer();
+        return { buffer: transparentBuffer, type: 'bg_removed' };
+      }
     }
 
     return { buffer, type: 'photo' };
@@ -117,8 +154,13 @@ async function generateTextLogo(name: string): Promise<Buffer> {
 }
 
 // ---------------------------------------------------------
-// 4. INTELLIGENT WEBSITE SCRAPER (WITH VUE/WEEBLY FIX)
+// 4. INTELLIGENT WEBSITE SCRAPER 
 // ---------------------------------------------------------
+function hasLogo(str: string | undefined | null): boolean {
+  if (!str) return false;
+  return str.toLowerCase().includes('logo');
+}
+
 async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Promise<string | null> {
   try {
     let secureUrl = websiteUrl;
@@ -145,36 +187,42 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
     const $ = cheerio.load(html);
     let logoUrl: string | null = null;
 
-    const getBestImageSrc = (el: any): string | null => {
-      const widthStr = $(el).attr('width');
+    const getBestImageSrc = (imgEl: any): string | null => {
+      const widthStr = $(imgEl).attr('width');
       if (widthStr) {
         const w = parseInt(widthStr);
         if (w <= 40) return null;
       }
 
-      let src = $(el).attr('data-src');
-      if (!src) src = $(el).attr('src');
-      // 🔥 FIX: Check 'original' attribute for Vue/Weebly sites
-      if (!src) src = $(el).attr('original'); 
-      if (!src) src = $(el).attr('data-original');
+      let src = $(imgEl).attr('data-src');
+      if (!src) {
+        src = $(imgEl).attr('src');
+      }
 
       let isDataImage = false;
       if (src) {
-        if (src.startsWith('data:image')) isDataImage = true;
+        if (src.startsWith('data:image')) {
+          isDataImage = true;
+        }
       } else {
         isDataImage = true;
       }
 
       if (isDataImage) {
-        let srcset = $(el).attr('srcset');
-        if (!srcset) srcset = $(el).attr('data-srcset');
-        if (srcset) src = srcset.split(',')[0].trim().split(' ')[0];
+        let srcset = $(imgEl).attr('srcset');
+        if (!srcset) {
+          srcset = $(imgEl).attr('data-srcset');
+        }
+        if (srcset) {
+          src = srcset.split(',')[0].trim().split(' ')[0];
+        }
       }
 
       if (src) {
-        if (src.startsWith('data:image')) return null;
-        // 🔥 FIX: Encode spaces so fetch() doesn't crash with TypeError: Invalid URL
-        return src.replace(/ /g, '%20');
+        if (src.startsWith('data:image')) {
+          return null;
+        }
+        return src;
       }
       return null;
     };
@@ -193,24 +241,6 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       return true;
     };
 
-    // Target 1: Background Images (Moego, etc)
-    $('[style*="background-image"]').each((_, el) => {
-      let style = $(el).attr('style');
-      if (style) {
-        let match = style.match(/background-image:\s*url\s*\(\s*(.*?)\s*\)/i);
-        if (match) {
-          if (match[1]) {
-            let src = match[1].replace(/&quot;/g, '').replace(/^['"]/, '').replace(/['"]$/, '');
-            if (isValidLogo(src)) {
-              if (domain.includes('moego')) { logoUrl = src; return false; }
-            }
-          }
-        }
-      }
-    });
-    if (logoUrl) return resolveUrl(logoUrl, secureUrl);
-
-    // Target 2: Google Sites & Groomer.io
     if (domain.includes('sites.google.com')) {
       $('.lzy1Td').each((_, el) => {
         const src = getBestImageSrc(el);
@@ -227,48 +257,38 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       if (logoUrl) return resolveUrl(logoUrl, secureUrl);
     }
 
-    // Target 3: MASSIVE LOGO SEARCH (Checks all elements, not just imgs)
-    $('*').each((_, el) => {
-      let alt = $(el).attr('alt');
-      if (!alt) alt = '';
-      
-      let className = $(el).attr('class');
-      if (!className) className = '';
-      
-      let id = $(el).attr('id');
-      if (!id) id = '';
-      
-      let isLogoEl = false;
-      if (alt.toLowerCase().includes('logo')) isLogoEl = true;
-      else if (className.toLowerCase().includes('logo')) isLogoEl = true;
-      else if (id.toLowerCase().includes('logo')) isLogoEl = true;
-      
-      if (isLogoEl) {
-        let src = getBestImageSrc(el);
-        
-        // If the <a> or <div> doesn't have the source, check its child <img>
-        if (!src) {
-          const childImg = $(el).find('img').first();
-          if (childImg.length > 0) {
-            src = getBestImageSrc(childImg[0]);
-          }
-        }
+    // 🔥 THE FIX: Deeply check alt, class, id, name, and src!
+    $('img').each((_, img) => {
+      let isTarget = false;
+      if (hasLogo($(img).attr('alt'))) isTarget = true;
+      if (hasLogo($(img).attr('class'))) isTarget = true;
+      if (hasLogo($(img).attr('id'))) isTarget = true;
+      if (hasLogo($(img).attr('name'))) isTarget = true;
+      if (hasLogo($(img).attr('src'))) isTarget = true;
+      if (hasLogo($(img).attr('data-src'))) isTarget = true;
 
-        if (isValidLogo(src)) {
-          logoUrl = src;
-          return false; // Break the loop
+      if (isTarget) {
+        const src = getBestImageSrc(img);
+        if (isValidLogo(src)) { 
+          logoUrl = src; 
+          return false; // Break loop
         }
       }
     });
 
     if (logoUrl) return resolveUrl(logoUrl, secureUrl);
 
-    // Target 4: Home Links Fallback
     $('a').each((_, a) => {
       let href = $(a).attr('href');
       if (!href) href = '';
       
-      if (href === '/' || href.includes(domain)) {
+      if (href === '/') {
+        const img = $(a).find('img').first();
+        if (img.length > 0) {
+          const src = getBestImageSrc(img[0]);
+          if (isValidLogo(src)) { logoUrl = src; return false; }
+        }
+      } else if (href.includes(domain)) {
         const img = $(a).find('img').first();
         if (img.length > 0) {
           const src = getBestImageSrc(img[0]);
@@ -391,11 +411,6 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: s
         if (!result) return reject(new Error("No result from Cloudinary"));
 
         let transform = 'b_transparent,w_600,h_600,c_pad,g_auto,f_avif,q_auto:best';
-        
-        if (imageType !== 'photo') {
-          transform = `e_make_transparent:15,` + transform;
-        }
-
         const optimizedUrl = result.secure_url.replace('/upload/', `/upload/${transform}/`);
         
         let primary = null, secondary = null, tertiary = null;
@@ -416,10 +431,8 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: s
 function isBadColors(p: string | null, s: string | null, t: string | null): boolean {
   if (!p) return false;
   const primary = p.toUpperCase();
-  let secondary = "";
-  if (s) secondary = s.toUpperCase();
-  let tertiary = "";
-  if (t) tertiary = t.toUpperCase();
+  const secondary = s ? s.toUpperCase() : "";
+  const tertiary = t ? t.toUpperCase() : "";
 
   if (primary === "#101928" && secondary === "#FFFFFF") return true; 
   if (primary === "#0987C5" && secondary === "#FFFFFE" && tertiary === "#EFFBFD") return true; 
