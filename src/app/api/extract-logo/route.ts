@@ -51,7 +51,7 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
     const bl = getPixel(insetX, height - insetY - 1);
     const br = getPixel(width - insetX - 1, height - insetY - 1);
 
-    // 1. If ANY corner is already transparent (Alpha < 250), it is ALREADY a Transparent Logo!
+    // If ANY corner is already transparent (Alpha < 250), it is ALREADY a Transparent Logo!
     let isAlreadyTransparent = false;
     if (tl[3] < 250) isAlreadyTransparent = true;
     if (tr[3] < 250) isAlreadyTransparent = true;
@@ -62,7 +62,6 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
       return { buffer, type: 'transparent' };
     }
 
-    // It is fully opaque. Check if the 4 corners match exactly.
     const colorDist = (c1: number[], c2: number[]) => 
       Math.abs(c1[0] - c2[0]) + Math.abs(c1[1] - c2[1]) + Math.abs(c1[2] - c2[2]);
 
@@ -80,7 +79,6 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
       const g = tl[1];
       const b = tl[2];
 
-      // Detect if the solid background is White or Black
       let isWhite = false;
       if (r > 230) {
         if (g > 230) {
@@ -95,13 +93,10 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
         }
       }
 
-      // Only erase the background if it is White or Black.
-      // If it's a weird color, we treat it as a photo and crop it into a circle!
       if (isWhite) {
         const bgColor = tl;
         const tolerance = 45; 
         const newData = Buffer.from(data);
-        
         for (let i = 0; i < newData.length; i += 4) {
           const dist = Math.abs(newData[i] - bgColor[0]) + Math.abs(newData[i + 1] - bgColor[1]) + Math.abs(newData[i + 2] - bgColor[2]);
           if (dist <= tolerance) {
@@ -116,7 +111,6 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
         const bgColor = tl;
         const tolerance = 45; 
         const newData = Buffer.from(data);
-        
         for (let i = 0; i < newData.length; i += 4) {
           const dist = Math.abs(newData[i] - bgColor[0]) + Math.abs(newData[i + 1] - bgColor[1]) + Math.abs(newData[i + 2] - bgColor[2]);
           if (dist <= tolerance) {
@@ -155,21 +149,7 @@ async function cropToCircle(buffer: Buffer): Promise<Buffer> {
 }
 
 // ---------------------------------------------------------
-// 3. ELEGANT TEXT LOGO GENERATOR
-// ---------------------------------------------------------
-async function generateTextLogo(name: string): Promise<Buffer> {
-  const shortName = name.substring(0, 30);
-  const svgTemplate = `
-    <svg width="800" height="400" xmlns="http://www.w3.org/2000/svg">
-      <rect width="800" height="400" fill="transparent" />
-      <text x="400" y="220" font-family="'Brush Script MT', 'Lucida Handwriting', 'Georgia', cursive, serif" font-style="italic" font-size="65" font-weight="bold" fill="#111827" text-anchor="middle" dominant-baseline="middle">${shortName}</text>
-    </svg>`;
-
-  return await sharp(Buffer.from(svgTemplate)).png().toBuffer();
-}
-
-// ---------------------------------------------------------
-// 4. INTELLIGENT WEBSITE SCRAPER (SCORING ENGINE)
+// 3. INTELLIGENT WEBSITE SCRAPER (SCORING ENGINE)
 // ---------------------------------------------------------
 interface LogoCandidate {
   url: string;
@@ -202,6 +182,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
     const $ = cheerio.load(html);
     const candidates: LogoCandidate[] = [];
 
+    // ZERO "OR" OPERATORS ALLOWED TO PREVENT SYNTAX CRASHES
     const getBestImageSrc = (imgEl: any): string | null => {
       let src = $(imgEl).attr('data-src');
       if (!src) {
@@ -252,7 +233,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       return true;
     };
 
-    // Evaluate every single image on the page and give it a score!
+    // Evaluate every single image on the page
     $('img').each((_, img) => {
       let score = 0;
       let isTarget = false;
@@ -272,15 +253,23 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       let srcAttr = $(img).attr('src');
       if (!srcAttr) srcAttr = '';
 
-      if (alt.toLowerCase().includes('logo')) { isTarget = true; score += 20; }
-      if (className.toLowerCase().includes('logo')) { isTarget = true; score += 10; }
-      if (id.toLowerCase().includes('logo')) { isTarget = true; score += 10; }
-      if (nameAttr.toLowerCase().includes('logo')) { isTarget = true; score += 15; }
-      if (srcAttr.toLowerCase().includes('logo')) { isTarget = true; score += 10; }
+      // Direct Image Attribute Checks
+      if (alt.toLowerCase().includes('logo')) { isTarget = true; score += 30; }
+      if (className.toLowerCase().includes('logo')) { isTarget = true; score += 20; }
+      if (id.toLowerCase().includes('logo')) { isTarget = true; score += 20; }
+      if (nameAttr.toLowerCase().includes('logo')) { isTarget = true; score += 25; }
+      if (srcAttr.toLowerCase().includes('logo')) { isTarget = true; score += 20; }
 
-      // Check if wrapped in a home link
+      // Check Parent <a> wrapper (Catches "A Dog's Best Friend" logo__link!)
       const parentA = $(img).closest('a');
       if (parentA.length > 0) {
+        let parentClass = parentA.attr('class');
+        if (!parentClass) parentClass = '';
+        if (parentClass.toLowerCase().includes('logo')) {
+          isTarget = true;
+          score += 30;
+        }
+
         let href = parentA.attr('href');
         if (!href) href = '';
         if (href === '/') {
@@ -298,11 +287,11 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
         score += 20;
       }
 
-      // Check sizes to favor massive images and penalize tiny 1KB icons
+      // Penalize tiny icons severely
       let w = $(img).attr('width');
       if (w) {
         let wInt = parseInt(w);
-        if (wInt < 50) score -= 50; 
+        if (wInt < 50) score -= 100; 
         if (wInt >= 150) score += 10;
         if (wInt >= 300) score += 20;
       }
@@ -310,44 +299,11 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       if (isTarget) {
         const bestSrc = getBestImageSrc(img);
         if (bestSrc) {
-          // If the URL demands high resolution, boost score!
           if (bestSrc.includes('width=')) score += 10;
           if (bestSrc.includes('optimize=')) score += 5;
           
           if (isValidLogo(bestSrc)) {
             candidates.push({ url: bestSrc, score: score });
-          }
-        }
-      }
-    });
-
-    // Special handlers for weird platforms
-    if (domain.includes('sites.google.com')) {
-      $('.lzy1Td').each((_, el) => {
-        const src = getBestImageSrc(el);
-        if (isValidLogo(src)) { candidates.push({ url: src as string, score: 50 }); }
-      });
-    }
-
-    if (domain.includes('groomer.io')) {
-      $('.logo-container img, #stamp').each((_, el) => {
-        const src = getBestImageSrc(el);
-        if (isValidLogo(src)) { candidates.push({ url: src as string, score: 50 }); }
-      });
-    }
-
-    $('[style*="background-image"]').each((_, el) => {
-      let style = $(el).attr('style');
-      if (style) {
-        let match = style.match(/background-image:\s*url\s*\(\s*(.*?)\s*\)/i);
-        if (match) {
-          if (match[1]) {
-            let src = match[1].replace(/&quot;/g, '').replace(/^['"]/, '').replace(/['"]$/, '');
-            if (isValidLogo(src)) {
-              if (domain.includes('moego')) { 
-                candidates.push({ url: src, score: 50 }); 
-              }
-            }
           }
         }
       }
@@ -373,7 +329,7 @@ function resolveUrl(rawUrl: string, baseUrl: string): string {
 }
 
 // ---------------------------------------------------------
-// 5. FACEBOOK SCRAPER
+// 4. FACEBOOK SCRAPER
 // ---------------------------------------------------------
 function cleanFacebookUrl(rawUrl: string): string {
   if (!rawUrl) return "";
@@ -480,7 +436,6 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
           }
         }
         
-        // 🔥 RETURNS RAW PUBLIC URL, EXACTLY AS REQUESTED
         resolve({ url: result.secure_url, colors: { primary, secondary, tertiary } });
       }
     );
@@ -514,10 +469,6 @@ export async function POST(req: Request) {
     if (!fbUrl) fbUrl = lead.facebookurl;
     if (!fbUrl) fbUrl = lead.aifacebook;
     if (!fbUrl) fbUrl = lead["extracted facebook"];
-
-    let businessName = lead.Name;
-    if (!businessName) businessName = lead.facebookname;
-    if (!businessName) businessName = "Pet Grooming";
 
     let finalCloudinaryData: any = null;
     let finalType = 'none';
@@ -576,13 +527,15 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. Text Logo Fallback
+    // 3. NO MORE TEXT LOGO GENERATION! Just skip if nothing is found.
     if (!finalCloudinaryData) {
-      const txtBuffer = await generateTextLogo(businessName);
-      const result = await processAndUpload(txtBuffer);
-      finalCloudinaryData = result.cData;
-      source = 'text';
-      finalType = result.type;
+       return NextResponse.json({
+         success: true,
+         sourceUsed: 'none',
+         processingResult: 'skipped',
+         logoUrl: '',
+         colors: { primary: null, secondary: null, tertiary: null }
+       });
     }
 
     return NextResponse.json({
