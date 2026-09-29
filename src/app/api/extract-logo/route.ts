@@ -147,7 +147,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       }
       return (src && !src.startsWith('data:image')) ? src : null;
     };
-    
+
     const isValidLogo = (url: string | null | undefined): boolean => {
       if (!url) return false;
       const lower = url.toLowerCase();
@@ -293,17 +293,22 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
 // ---------------------------------------------------------
 // MAIN API ENDPOINT
 // ---------------------------------------------------------
+// ---------------------------------------------------------
+// MAIN API ENDPOINT
+// ---------------------------------------------------------
 export async function POST(req: Request) {
   try {
-    const lead = await req.json(); 
-    const websiteUrl = lead.Website;
-    const fbUrl = lead.Facebook || lead.facebookurl || lead.aifacebook || lead["extracted facebook"];
-    const businessName = lead.Name || lead.facebookname || "Pet Grooming";
+    const body = await req.json(); // Accept the entire JSON row from n8n
+
+    // 1. Bulletproof Key Extraction (Checks for n8n keys with capital letters)
+    const websiteUrl = body.Website || body.websiteUrl || body.website || "";
+    const fbUrl = body.Facebook || body.facebookUrl || body.facebookurl || body.aifacebook || body["extracted facebook"] || "";
+    const businessName = body.Name || body.businessName || body.facebookname || "Pet Grooming";
 
     let imageBuffer: Buffer | null = null;
     let source = 'none';
 
-    // 1. Try Website Extraction
+    // 2. Try Website Extraction
     if (websiteUrl && websiteUrl.trim() !== '') {
       const urlObj = new URL(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`);
       const domain = urlObj.hostname.replace('www.', '');
@@ -318,19 +323,20 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2. Try Facebook Fallback
+    // 3. Try Facebook Fallback (If no website, or website extraction failed)
     if (!imageBuffer && fbUrl && fbUrl.trim() !== '') {
       imageBuffer = await scrapeFacebookPic(fbUrl);
       if (imageBuffer) source = 'facebook';
     }
 
-    // 3. Text Logo Fallback
+    // 4. Elegant Text Logo Fallback (If no website AND no Facebook)
     if (!imageBuffer) {
       imageBuffer = await generateTextLogo(businessName);
       source = 'text';
     }
 
-    // 4. Pixel Processing Engine
+    // 5. "Magic Wand" Pixel Processing Engine
+    // Checks the 4 corners: If solid color -> removes background. If complex -> crops to circle.
     const { buffer: processedBuffer, type } = await processImagePixels(imageBuffer!);
     let finalBuffer = processedBuffer;
 
@@ -338,14 +344,15 @@ export async function POST(req: Request) {
       finalBuffer = await cropToCircle(processedBuffer);
     }
 
-    // 5. Upload to Cloudinary
+    // 6. Upload to Cloudinary (Extracts dominant colors instantly)
     const cleanId = `logo_${Date.now()}`;
     const cloudinaryData = await uploadToCloudinary(finalBuffer, cleanId);
 
+    // 7. Return perfect payload to n8n
     return NextResponse.json({
       success: true,
       sourceUsed: source,
-      processingResult: type,
+      processingResult: type, // 'transparent', 'bg_removed', or 'photo'
       logoUrl: cloudinaryData.url,
       colors: cloudinaryData.colors
     });
