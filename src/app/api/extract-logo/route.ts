@@ -43,7 +43,6 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
       return [data[i], data[i + 1], data[i + 2], data[i + 3]];
     };
 
-    // 🔥 THE FIX: Move 5 pixels inwards to avoid 1px border artifacts or noise!
     const insetX = Math.min(5, Math.floor(width * 0.05));
     const insetY = Math.min(5, Math.floor(height * 0.05));
 
@@ -52,7 +51,6 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
     const bl = getPixel(insetX, height - insetY - 1);
     const br = getPixel(width - insetX - 1, height - insetY - 1);
 
-    // 1. If ALL 4 corners are transparent, we don't need manual BG removal
     if (tl[3] < 10 && tr[3] < 10 && bl[3] < 10 && br[3] < 10) {
       return { buffer, type: 'transparent' };
     }
@@ -60,10 +58,9 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
     const colorDist = (c1: number[], c2: number[]) => 
       Math.abs(c1[0] - c2[0]) + Math.abs(c1[1] - c2[1]) + Math.abs(c1[2] - c2[2]);
 
-    // 2. Check if it has a solid background (all 4 corners match)
     if (colorDist(tl, tr) < 30 && colorDist(tl, bl) < 30 && colorDist(tl, br) < 30) {
       const bgColor = tl;
-      const tolerance = 45; // Increased tolerance to catch JPEG artifacting around white backgrounds
+      const tolerance = 45;
       
       const newData = Buffer.from(data);
       for (let i = 0; i < newData.length; i += 4) {
@@ -77,7 +74,6 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
       return { buffer: transparentBuffer, type: 'bg_removed' };
     }
 
-    // 3. Corners don't match = It's a real photo
     return { buffer, type: 'photo' };
 
   } catch (err) {
@@ -119,7 +115,7 @@ async function generateTextLogo(name: string): Promise<Buffer> {
 }
 
 // ---------------------------------------------------------
-// 4. INTELLIGENT WEBSITE SCRAPER (ZERO || OPERATORS)
+// 4. INTELLIGENT WEBSITE SCRAPER
 // ---------------------------------------------------------
 async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Promise<string | null> {
   try {
@@ -133,12 +129,8 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       signal: AbortSignal.timeout(10000)
     });
 
-    if (!response.ok) {
-      return null;
-    }
-    if (response.status >= 400) {
-      return null;
-    }
+    if (!response.ok) return null;
+    if (response.status >= 400) return null;
     
     const html = await response.text();
     const htmlLower = html.toLowerCase();
@@ -151,7 +143,6 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
     const $ = cheerio.load(html);
     let logoUrl: string | null = null;
 
-    // 🔥 THE SYNTAX FIX: This is rewritten without ANY || or && to prevent LaTeX compiler crashes!
     const getBestImageSrc = (imgEl: any): string | null => {
       const widthStr = $(imgEl).attr('width');
       if (widthStr) {
@@ -160,39 +151,28 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       }
 
       let src = $(imgEl).attr('data-src');
-      if (!src) {
-        src = $(imgEl).attr('src');
-      }
+      if (!src) src = $(imgEl).attr('src');
 
       let isDataImage = false;
       if (src) {
-        if (src.startsWith('data:image')) {
-          isDataImage = true;
-        }
+        if (src.startsWith('data:image')) isDataImage = true;
       } else {
         isDataImage = true;
       }
 
       if (isDataImage) {
         let srcset = $(imgEl).attr('srcset');
-        if (!srcset) {
-          srcset = $(imgEl).attr('data-srcset');
-        }
-        if (srcset) {
-          src = srcset.split(',')[0].trim().split(' ')[0];
-        }
+        if (!srcset) srcset = $(imgEl).attr('data-srcset');
+        if (srcset) src = srcset.split(',')[0].trim().split(' ')[0];
       }
 
       if (src) {
-        if (src.startsWith('data:image')) {
-          return null;
-        }
+        if (src.startsWith('data:image')) return null;
         return src;
       }
       return null;
     };
 
-    // Helper to safely check keywords
     const isValidLogo = (url: string | null | undefined): boolean => {
       if (!url) return false;
       const lower = url.toLowerCase();
@@ -207,7 +187,6 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       return true;
     };
 
-    // Target 1: Google Sites
     if (domain.includes('sites.google.com')) {
       $('.lzy1Td').each((_, el) => {
         const src = getBestImageSrc(el);
@@ -216,7 +195,6 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       if (logoUrl) return resolveUrl(logoUrl, secureUrl);
     }
 
-    // Target 2: Groomer.io
     if (domain.includes('groomer.io')) {
       $('.logo-container img, #stamp').each((_, el) => {
         const src = getBestImageSrc(el);
@@ -225,7 +203,6 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       if (logoUrl) return resolveUrl(logoUrl, secureUrl);
     }
 
-    // Target 3: Standard Patterns
     $('img').each((_, img) => {
       let alt = $(img).attr('alt');
       if (!alt) alt = '';
@@ -250,7 +227,6 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
 
     if (logoUrl) return resolveUrl(logoUrl, secureUrl);
 
-    // Target 4: Home Links
     $('a').each((_, a) => {
       let href = $(a).attr('href');
       if (!href) href = '';
@@ -270,9 +246,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       }
     });
 
-    if (logoUrl) {
-      return resolveUrl(logoUrl, secureUrl);
-    }
+    if (logoUrl) return resolveUrl(logoUrl, secureUrl);
     return null;
 
   } catch (err) {
@@ -370,7 +344,7 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
 }
 
 // ---------------------------------------------------------
-// CLOUDINARY FINAL UPLOAD (WITH B_TRANSPARENT FIX)
+// CLOUDINARY FINAL UPLOAD (CLEAN URL RETURN)
 // ---------------------------------------------------------
 async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: string): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -380,16 +354,6 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: s
         if (error) return reject(error);
         if (!result) return reject(new Error("No result from Cloudinary"));
 
-        // 🔥 THE FIX: b_transparent prevents Cloudinary from adding white boxes when padding the image!
-        let transform = 'b_transparent,w_600,h_600,c_pad,g_auto,f_avif,q_auto:best';
-        
-        // Add e_make_transparent:15 to cleanly erase the last bits of noise on Logos
-        if (imageType !== 'photo') {
-          transform = `e_make_transparent:15,` + transform;
-        }
-
-        const optimizedUrl = result.secure_url.replace('/upload/', `/upload/${transform}/`);
-        
         let primary = null, secondary = null, tertiary = null;
         if (result.colors) {
           if (result.colors.length > 0) {
@@ -398,7 +362,9 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: s
             if (result.colors[2]) tertiary = result.colors[2][0];
           }
         }
-        resolve({ url: optimizedUrl, colors: { primary, secondary, tertiary } });
+        
+        // 🔥 Return the clean, public URL requested
+        resolve({ url: result.secure_url, colors: { primary, secondary, tertiary } });
       }
     );
     uploadStream.end(buffer);
