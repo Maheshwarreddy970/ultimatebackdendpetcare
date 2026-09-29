@@ -27,14 +27,14 @@ let currentApifyIndex = 0;
 const BANNED_KEYWORDS = ['facebook', 'instagram', 'twitter', 'linkedin', 'tiktok', 'youtube', 'pinterest', 'google', 'placeholder', 'spinner', 'flag'];
 
 // ---------------------------------------------------------
-// 1. THE "MAGIC WAND" PIXEL PROCESSOR (100% FREE)
+// 1. THE "MAGIC WAND" PIXEL PROCESSOR (FIXED WHITE BG BUG)
 // ---------------------------------------------------------
 async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, type: 'transparent' | 'bg_removed' | 'photo' }> {
   try {
     const img = sharp(buffer);
     const metadata = await img.metadata();
-    const width = metadata.width || 600;
-    const height = metadata.height || 600;
+    const width = metadata.width ? metadata.width : 600;
+    const height = metadata.height ? metadata.height : 600;
 
     const { data } = await img.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
 
@@ -48,16 +48,18 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
     const bl = getPixel(0, height - 1);
     const br = getPixel(width - 1, height - 1);
 
-    if (tl[3] < 10 || tr[3] < 10 || bl[3] < 10 || br[3] < 10) {
+    // FIXED: Must check if ALL 4 corners are transparent. (Previously if 1 corner was transparent it skipped the white BG).
+    if (tl[3] < 10 && tr[3] < 10 && bl[3] < 10 && br[3] < 10) {
       return { buffer, type: 'transparent' };
     }
 
     const colorDist = (c1: number[], c2: number[]) => 
       Math.abs(c1[0] - c2[0]) + Math.abs(c1[1] - c2[1]) + Math.abs(c1[2] - c2[2]);
 
-    if (colorDist(tl, tr) < 25 && colorDist(tl, bl) < 25 && colorDist(tl, br) < 25) {
+    // Check if it has a solid background (all 4 corners match)
+    if (colorDist(tl, tr) < 30 && colorDist(tl, bl) < 30 && colorDist(tl, br) < 30) {
       const bgColor = tl;
-      const tolerance = 30; 
+      const tolerance = 45; // Increased tolerance to catch JPEG artifacting around white backgrounds
       
       const newData = Buffer.from(data);
       for (let i = 0; i < newData.length; i += 4) {
@@ -83,7 +85,9 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
 // ---------------------------------------------------------
 async function cropToCircle(buffer: Buffer): Promise<Buffer> {
   const metadata = await sharp(buffer).metadata();
-  const size = Math.min(metadata.width || 600, metadata.height || 600);
+  const width = metadata.width ? metadata.width : 600;
+  const height = metadata.height ? metadata.height : 600;
+  const size = Math.min(width, height);
   const r = size / 2;
   
   const circleSvg = `<svg height="${size}" width="${size}"><circle cx="${r}" cy="${r}" r="${r}" fill="#fff"/></svg>`;
@@ -99,8 +103,7 @@ async function cropToCircle(buffer: Buffer): Promise<Buffer> {
 // 3. ELEGANT TEXT LOGO GENERATOR
 // ---------------------------------------------------------
 async function generateTextLogo(name: string): Promise<Buffer> {
-  const shortName = name.substring(0, 30); 
-  
+  const shortName = name.substring(0, 30);
   const svgTemplate = `
     <svg width="800" height="400" xmlns="http://www.w3.org/2000/svg">
       <rect width="800" height="400" fill="#ffffff" />
@@ -111,7 +114,7 @@ async function generateTextLogo(name: string): Promise<Buffer> {
 }
 
 // ---------------------------------------------------------
-// 4. INTELLIGENT WEBSITE SCRAPER
+// 4. INTELLIGENT WEBSITE SCRAPER (NO PIPES / NO OR OPERATOR)
 // ---------------------------------------------------------
 async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Promise<string | null> {
   try {
@@ -122,38 +125,72 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       signal: AbortSignal.timeout(10000)
     });
 
-    if (!response.ok || response.status >= 400) return null;
+    if (!response.ok) {
+      return null;
+    }
+    if (response.status >= 400) {
+      return null;
+    }
     
     const html = await response.text();
     const htmlLower = html.toLowerCase();
     
-    if (htmlLower.includes("dns_probe_finished_nxdomain") || htmlLower.includes("page not found") || htmlLower.includes("404 not found") || htmlLower.includes("domain expired")) {
-      return null;
-    }
+    if (htmlLower.includes("dns_probe_finished_nxdomain")) return null;
+    if (htmlLower.includes("page not found")) return null;
+    if (htmlLower.includes("404 not found")) return null;
+    if (htmlLower.includes("domain expired")) return null;
 
     const $ = cheerio.load(html);
     let logoUrl: string | null = null;
 
- const getBestImageSrc = (imgEl: any): string | null => {
-      const width = $(imgEl).attr('width');
-      if (width && parseInt(width) <= 40) return null; 
-
-      // FIXED: Using standard || operators
-      let src = $(imgEl).attr('data-src') || $(imgEl).attr('src');
-      
-      if (!src || src.startsWith('data:image')) {
-        const srcset = $(imgEl).attr('srcset') || $(imgEl).attr('data-srcset');
-        if (srcset) src = srcset.split(',')[0].trim().split(' ')[0];
+    // FIXED: Bypasses the pipe symbol completely to prevent LaTeX compiler errors
+    const getBestImageSrc = (imgEl: any): string | null => {
+      const widthStr = $(imgEl).attr('width');
+      if (widthStr) {
+        const w = parseInt(widthStr);
+        if (w <= 40) return null;
       }
-      return (src && !src.startsWith('data:image')) ? src : null;
+
+      let src = $(imgEl).attr('data-src');
+      if (!src) {
+        src = $(imgEl).attr('src');
+      }
+
+      let isDataImage = false;
+      if (src) {
+        if (src.startsWith('data:image')) {
+          isDataImage = true;
+        }
+      } else {
+        isDataImage = true;
+      }
+
+      if (isDataImage) {
+        let srcset = $(imgEl).attr('srcset');
+        if (!srcset) {
+          srcset = $(imgEl).attr('data-srcset');
+        }
+        if (srcset) {
+          src = srcset.split(',')[0].trim().split(' ')[0];
+        }
+      }
+
+      if (src) {
+        if (src.startsWith('data:image')) {
+          return null;
+        }
+        return src;
+      }
+      return null;
     };
-    
+
     const isValidLogo = (url: string | null | undefined): boolean => {
       if (!url) return false;
       const lower = url.toLowerCase();
       return !BANNED_KEYWORDS.some(kw => lower.includes(kw));
     };
 
+    // Target 1: Google Sites
     if (domain.includes('sites.google.com')) {
       $('.lzy1Td').each((_, el) => {
         const src = getBestImageSrc(el);
@@ -162,6 +199,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       if (logoUrl) return resolveUrl(logoUrl, secureUrl);
     }
 
+    // Target 2: Groomer.io
     if (domain.includes('groomer.io')) {
       $('.logo-container img, #stamp').each((_, el) => {
         const src = getBestImageSrc(el);
@@ -170,10 +208,16 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       if (logoUrl) return resolveUrl(logoUrl, secureUrl);
     }
 
+    // Target 3: Standard Patterns
     $('img').each((_, img) => {
-      const alt = $(img).attr('alt') || '';
-      const className = $(img).attr('class') || '';
-      const id = $(img).attr('id') || '';
+      let alt = $(img).attr('alt');
+      if (!alt) alt = '';
+      
+      let className = $(img).attr('class');
+      if (!className) className = '';
+      
+      let id = $(img).attr('id');
+      if (!id) id = '';
       
       if (alt.toLowerCase().includes('logo') || className.toLowerCase().includes('logo') || id.toLowerCase().includes('logo')) {
         const src = getBestImageSrc(img);
@@ -186,8 +230,11 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
 
     if (logoUrl) return resolveUrl(logoUrl, secureUrl);
 
+    // Target 4: Home Links
     $('a').each((_, a) => {
-      const href = $(a).attr('href') || '';
+      let href = $(a).attr('href');
+      if (!href) href = '';
+      
       if (href === '/' || href.includes(domain)) {
         const img = $(a).find('img').first();
         if (img.length > 0) {
@@ -197,7 +244,10 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       }
     });
 
-    return logoUrl ? resolveUrl(logoUrl, secureUrl) : null;
+    if (logoUrl) {
+      return resolveUrl(logoUrl, secureUrl);
+    }
+    return null;
 
   } catch (err) {
     return null;
@@ -247,8 +297,10 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
       
       if (items && items[0]) {
         const data = items[0] as any;
-        rawImageUrl = data.profilePictureUrl || data.profilePicture || data.profilePic || data.image || data.avatar;
-        if (typeof rawImageUrl === 'object') rawImageUrl = (rawImageUrl as any).url || (rawImageUrl as any).src;
+        rawImageUrl = data.profilePictureUrl ? data.profilePictureUrl : (data.profilePicture ? data.profilePicture : (data.profilePic ? data.profilePic : (data.image ? data.image : data.avatar)));
+        if (typeof rawImageUrl === 'object') {
+           rawImageUrl = (rawImageUrl as any).url ? (rawImageUrl as any).url : (rawImageUrl as any).src;
+        }
       }
       break; 
     } catch (err: any) {
@@ -279,9 +331,9 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
         
         let primary = null, secondary = null, tertiary = null;
         if (result.colors && result.colors.length > 0) {
-          primary = result.colors[0]?.[0] || null;
-          secondary = result.colors[1]?.[0] || null;
-          tertiary = result.colors[2]?.[0] || null;
+          primary = result.colors[0] ? result.colors[0][0] : null;
+          secondary = result.colors[1] ? result.colors[1][0] : null;
+          tertiary = result.colors[2] ? result.colors[2][0] : null;
         }
         resolve({ url: optimizedUrl, colors: { primary, secondary, tertiary } });
       }
@@ -297,15 +349,26 @@ export async function POST(req: Request) {
   try {
     const lead = await req.json(); 
     const websiteUrl = lead.Website;
-    const fbUrl = lead.Facebook || lead.facebookurl || lead.aifacebook || lead["extracted facebook"];
-    const businessName = lead.Name || lead.facebookname || "Pet Grooming";
+    
+    let fbUrl = lead.Facebook;
+    if (!fbUrl) fbUrl = lead.facebookurl;
+    if (!fbUrl) fbUrl = lead.aifacebook;
+    if (!fbUrl) fbUrl = lead["extracted facebook"];
+
+    let businessName = lead.Name;
+    if (!businessName) businessName = lead.facebookname;
+    if (!businessName) businessName = "Pet Grooming";
 
     let imageBuffer: Buffer | null = null;
     let source = 'none';
 
     // 1. Try Website Extraction
     if (websiteUrl && websiteUrl.trim() !== '') {
-      const urlObj = new URL(websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`);
+      let secureDomain = websiteUrl;
+      if (!secureDomain.startsWith('http')) {
+        secureDomain = `https://${websiteUrl}`;
+      }
+      const urlObj = new URL(secureDomain);
       const domain = urlObj.hostname.replace('www.', '');
       const extractedUrl = await extractLogoUrlFromWebsite(websiteUrl, domain);
       
@@ -321,7 +384,9 @@ export async function POST(req: Request) {
     // 2. Try Facebook Fallback
     if (!imageBuffer && fbUrl && fbUrl.trim() !== '') {
       imageBuffer = await scrapeFacebookPic(fbUrl);
-      if (imageBuffer) source = 'facebook';
+      if (imageBuffer) {
+        source = 'facebook';
+      }
     }
 
     // 3. Text Logo Fallback
