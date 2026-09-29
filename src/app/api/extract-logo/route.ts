@@ -223,7 +223,6 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
           srcset = $(imgEl).attr('data-srcset');
         }
         if (srcset) {
-          // Grab the LAST element in srcset, which is usually the highest resolution!
           const parts = srcset.split(',');
           const lastPart = parts[parts.length - 1];
           src = lastPart.trim().split(' ')[0];
@@ -462,9 +461,9 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
 }
 
 // ---------------------------------------------------------
-// CLOUDINARY FINAL UPLOAD 
+// CLOUDINARY FINAL UPLOAD (RAW PUBLIC URL)
 // ---------------------------------------------------------
-async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: string): Promise<any> {
+async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       { public_id: publicId, folder: 'logos', overwrite: true, resource_type: 'auto', colors: true },
@@ -472,15 +471,6 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: s
         if (error) return reject(error);
         if (!result) return reject(new Error("No result from Cloudinary"));
 
-        let transform = 'b_transparent,w_600,h_600,c_pad,g_auto,f_avif,q_auto:best';
-        
-        // Add e_make_transparent:15 to cleanly erase the last bits of noise on Logos
-        if (imageType !== 'photo') {
-          transform = `e_make_transparent:15,` + transform;
-        }
-
-        const optimizedUrl = result.secure_url.replace('/upload/', `/upload/${transform}/`);
-        
         let primary = null, secondary = null, tertiary = null;
         if (result.colors) {
           if (result.colors.length > 0) {
@@ -489,7 +479,9 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string, imageType: s
             if (result.colors[2]) tertiary = result.colors[2][0];
           }
         }
-        resolve({ url: optimizedUrl, colors: { primary, secondary, tertiary } });
+        
+        // 🔥 RETURNS RAW PUBLIC URL, EXACTLY AS REQUESTED
+        resolve({ url: result.secure_url, colors: { primary, secondary, tertiary } });
       }
     );
     uploadStream.end(buffer);
@@ -538,7 +530,7 @@ export async function POST(req: Request) {
         finalBuffer = await cropToCircle(processedBuffer);
       }
       const cleanId = `logo_${Date.now()}`;
-      const cData = await uploadToCloudinary(finalBuffer, cleanId, type);
+      const cData = await uploadToCloudinary(finalBuffer, cleanId);
       return { cData, type };
     };
 
