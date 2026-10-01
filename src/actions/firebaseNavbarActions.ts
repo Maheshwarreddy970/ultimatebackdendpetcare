@@ -7,10 +7,11 @@ import { ApifyClient } from 'apify-client';
 import sharp from 'sharp';
 
 cloudinary.config({
-  cloud_name: 'dduwiqu4j',
-  api_key: '735486643625886',
-  api_secret: 'EQVhBgJCEv3t_EgfKHcKSjEJTqA',
+  cloud_name: 'ta5klglv',
+  api_key: '228386464312455',
+  api_secret: 'pIoksKtT9h6ez0k3KhbcwjAoU7o',
 });
+
 
 const APIFY_TOKENS = [
   'apify_api_zP6UkcgE9nEdRfvtxgfH9C9S9VG50G26Ch4U',
