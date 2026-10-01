@@ -10,7 +10,6 @@ export async function POST(req: Request) {
     const docId = email.toLowerCase().trim();
     const docRef = doc(db, "leads", docId);
 
-    // Primary color extracted from AI (fallback to #a35c38)
     const pColor = aiData.primaryColor ? aiData.primaryColor : "#a35c38";
     const darkText = "#1e0c05";
     const lightText = "#ffffff";
@@ -18,7 +17,11 @@ export async function POST(req: Request) {
     const bgLight = "#ffffff";
     const bgOffWhite = "#faf3ec";
 
-    // Build the massive JSON structure using AI generated text and injected colors
+    // 🔥 GENERATE UNIQUE SLUG (e.g., "panola-poodles-8392")
+    const cleanName = aiData.businessName.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "-").toLowerCase();
+    const randomNum = Math.floor(1000 + Math.random() * 9000);
+    const uniqueSlug = `${cleanName}-${randomNum}`;
+
     const websiteData = {
       theme: { primaryColor: pColor },
       navbar: {
@@ -173,7 +176,7 @@ export async function POST(req: Request) {
         styling: { textColor: darkText, mutedColor: mutedText, iconBg: pColor, iconText: lightText },
         info: {
           address: aiData.address,
-          phone: { label: aiData.phone || "Contact Us", href: `tel:${aiData.phone || ""}` },
+          phone: { label: "Contact Us", href: `#contact` },
           email: { label: email, href: `mailto:${email}` },
           mapEmbedUrl: "",
         },
@@ -182,13 +185,14 @@ export async function POST(req: Request) {
       }
     };
 
-    // SAVE TO FIREBASE WITH THE EXACT CURRENT DATE PUSHED
+    // 🔥 PUSH TO FIREBASE WITH THE EXACT CURRENT TIME
     await updateDoc(docRef, {
+      websiteSlug: uniqueSlug,
       websiteData: websiteData,
       websiteGeneratedAt: new Date().toISOString()
     });
 
-    return NextResponse.json({ success: true, message: "Website configured and saved successfully." });
+    return NextResponse.json({ success: true, slug: uniqueSlug, message: "Website saved successfully." });
 
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
