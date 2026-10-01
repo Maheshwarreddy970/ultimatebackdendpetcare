@@ -21,6 +21,7 @@ export async function POST(req: Request) {
     if (data.logoStatus === 'approved') {
       return NextResponse.json({
         status: 'approved',
+        email: docId, // <---- ADD THIS LINE HERE
         logoUrl: data.logoUrl,
         colors: {
           primary: data.primary,
