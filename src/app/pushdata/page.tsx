@@ -9,6 +9,9 @@ export default function PushDataPage() {
   const [loading, setLoading] = useState(false);
   const [log, setLog] = useState<string[]>([]);
 
+  
+
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
