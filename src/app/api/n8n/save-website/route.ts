@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     if (!email || !aiData) return NextResponse.json({ success: false, error: "Missing data" }, { status: 400 });
 
     const docId = email.toLowerCase().trim();
-    const leadRef = doc(db, "leads", docId);
+    const leadDocRef = doc(db, "leads", docId);
 
     const pColor = aiData.primaryColor ? aiData.primaryColor : "#a35c38";
     const darkText = "#1e0c05";
@@ -17,16 +17,13 @@ export async function POST(req: Request) {
     const bgLight = "#ffffff";
     const bgOffWhite = "#faf3ec";
 
-    // 🔥 1. GENERATE UNIQUE SLUG (e.g., "panola-poodles-8392")
+    // 🔥 GENERATE UNIQUE SLUG
     const cleanName = aiData.businessName.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "-").toLowerCase();
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     const uniqueSlug = `${cleanName}-${randomNum}`;
 
-    // 🔥 2. BUILD THE WEBSITE JSON
-    const websiteData = {
-      leadEmail: docId, // Link back to the lead
-      slug: uniqueSlug,
-      createdAt: new Date().toISOString(),
+    // 🔥 BUILD THE SPECIFIC websiteOneData STRUCTURE
+    const websiteOneData = {
       theme: { primaryColor: pColor },
       navbar: {
         section: { bg: bgLight, className: "" },
@@ -127,15 +124,15 @@ export async function POST(req: Request) {
         description: { text: aiData.reviewsDesc, color: mutedText, className: "" },
         columns: {
           col1: [
-            { type: "review", name: "David Chen", role: "Pet Owner", text: "“I was kinda nervous about taking Luna for grooming, but they totally relaxed her and made the experience enjoyable.”", avatar: `/demowebsite/person1.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor },
+            { type: "review", name: "David Chen", role: "Dog Owner", text: "“I was kinda nervous about taking Luna for grooming, but they totally relaxed her and made the experience enjoyable.”", avatar: `/demowebsite/person1.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor },
             { type: "stat-numeric", score: aiData.rating, scale: "/5", subtext: `Trusted by ${aiData.reviews} owners`, bg: pColor, scoreColor: lightText, textColor: lightText, starColor: lightText }
           ],
           col2: [
-            { type: "review", name: "James Thornton", role: "Pet Owner", text: "“They truly transformed my golden retriever, Max! He looked amazing and was happy the whole time. Exceptional care.”", avatar: `/demowebsite/person2.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor }
+            { type: "review", name: "James Thornton", role: "Dog Owner", text: "“They truly transformed my golden retriever, Max! He looked amazing and was happy the whole time. Exceptional care.”", avatar: `/demowebsite/person2.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor }
           ],
           col3: [
             { type: "stat-image", image: `/demowebsite/reviewcard.avif`, heading: "100%", subtext: "Satisfaction Guaranteed", bg: pColor, textColor: lightText, iconColor: lightText },
-            { type: "review", name: "Marcus Williams", role: "Pet Owner", text: "“As someone who owns three pets, I need a groomer I can fully trust. These guys are the absolute best.”", avatar: `/demowebsite/person3.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor }
+            { type: "review", name: "Marcus Williams", role: "Cat Owner", text: "“As someone who owns three pets, I need a groomer I can fully trust. These guys are the absolute best.”", avatar: `/demowebsite/person3.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor }
           ]
         }
       },
@@ -189,22 +186,33 @@ export async function POST(req: Request) {
       }
     };
 
-    // 🔥 3. SAVE TO "websites" COLLECTION USING THE SLUG AS THE ID
-    const websiteRef = doc(db, "websites", uniqueSlug);
-    await setDoc(websiteRef, websiteData);
+    // 🔥 CREATE THE NEW WEBSITE DOCUMENT IN THE 'websites' COLLECTION
+    const websiteDocData = {
+      slug: uniqueSlug,
+      ownerEmail: email,
+      clientName: aiData.businessName,
+      isDeployed: true,
+      customDomain: "",
+      domainStatus: "none",
+      template: "websiteOne",
+      lastUpdated: new Date().toISOString(),
+      websiteOneData: websiteOneData
+    };
 
-    // 🔥 4. UPDATE THE ORIGINAL LEAD WITH THE NEW SLUG
-    await updateDoc(leadRef, {
+    const websiteDocRef = doc(db, "websites", uniqueSlug);
+    await setDoc(websiteDocRef, websiteDocData);
+
+    // 🔥 UPDATE THE LEAD TO LINK IT TO THE NEW WEBSITE
+    await updateDoc(leadDocRef, {
       websiteSlug: uniqueSlug,
-      websiteGeneratedAt: new Date().toISOString(),
-      logoStatus: "website_generated" // Optional: update status so it doesn't get processed twice
+      websiteGeneratedAt: new Date().toISOString()
     });
 
-    // 🔥 5. RETURN THE SLUG DIRECTLY TO n8n
+    // Return the slug explicitly so n8n sees it
     return NextResponse.json({ 
       success: true, 
       slug: uniqueSlug, 
-      message: "Website saved to websites collection successfully." 
+      message: "Website configured and saved successfully." 
     });
 
   } catch (error: any) {
