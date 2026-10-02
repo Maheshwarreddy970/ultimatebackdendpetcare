@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
-import { doc, updateDoc, setDoc } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 
 export async function POST(req: Request) {
   try {
@@ -17,10 +17,52 @@ export async function POST(req: Request) {
     const bgLight = "#ffffff";
     const bgOffWhite = "#faf3ec";
 
-    // 🔥 GENERATE UNIQUE SLUG
-    const cleanName = aiData.businessName.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "-").toLowerCase();
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const uniqueSlug = `${cleanName}-${randomNum}`;
+    // 🔥 1. GENERATE CLEAN BASE SLUG (e.g., "panola-poodles")
+    let baseSlug = aiData.businessName
+      .replace(/[^a-zA-Z0-9 ]/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .toLowerCase();
+      
+    // Prevent double dashes if there were weird characters
+    baseSlug = baseSlug.replace(/-+/g, '-');
+
+    let finalSlug = baseSlug;
+
+    // 🔥 2. CHECK IF SLUG ALREADY EXISTS IN FIREBASE
+    let slugSnap = await getDoc(doc(db, "websites", finalSlug));
+
+    if (slugSnap.exists()) {
+      // If it exists, extract the City/Town from the address
+      const addressString = aiData.address || "";
+      const addressParts = addressString.split(',').map((p: string) => p.trim());
+      
+      let locationModifier = "petcare"; // Fallback
+      
+      if (addressParts.length > 2) {
+        // "123 Main St", "Dallas", "TX" -> Grab "Dallas"
+        locationModifier = addressParts[1];
+      } else if (addressParts.length === 2) {
+        // "Dallas", "TX" -> Grab "Dallas"
+        locationModifier = addressParts[0];
+      } else if (addressParts.length === 1 && addressParts[0]) {
+        locationModifier = addressParts[0];
+      }
+
+      const cleanLocation = locationModifier
+        .replace(/[^a-zA-Z0-9 ]/g, "")
+        .trim()
+        .replace(/\s+/g, "-")
+        .toLowerCase();
+
+      finalSlug = `${baseSlug}-${cleanLocation}`.replace(/-+/g, '-');
+
+      // Double-check just in case the business has multiple locations in the SAME city
+      const doubleCheckSnap = await getDoc(doc(db, "websites", finalSlug));
+      if (doubleCheckSnap.exists()) {
+        finalSlug = `${finalSlug}-grooming`; 
+      }
+    }
 
     // 🔥 BUILD THE SPECIFIC websiteOneData STRUCTURE
     const websiteOneData = {
@@ -188,7 +230,7 @@ export async function POST(req: Request) {
 
     // 🔥 CREATE THE NEW WEBSITE DOCUMENT IN THE 'websites' COLLECTION
     const websiteDocData = {
-      slug: uniqueSlug,
+      slug: finalSlug,
       ownerEmail: email,
       clientName: aiData.businessName,
       isDeployed: true,
@@ -199,19 +241,20 @@ export async function POST(req: Request) {
       websiteOneData: websiteOneData
     };
 
-    const websiteDocRef = doc(db, "websites", uniqueSlug);
+    const websiteDocRef = doc(db, "websites", finalSlug);
     await setDoc(websiteDocRef, websiteDocData);
 
     // 🔥 UPDATE THE LEAD TO LINK IT TO THE NEW WEBSITE
     await updateDoc(leadDocRef, {
-      websiteSlug: uniqueSlug,
+      websiteSlug: finalSlug,
       websiteGeneratedAt: new Date().toISOString()
     });
 
-    // Return the slug explicitly so n8n sees it
+    // Return the formatted sub-domain URL!
     return NextResponse.json({ 
       success: true, 
-      slug: uniqueSlug, 
+      slug: finalSlug, 
+      url: `${finalSlug}.nexpetcare.com`,
       message: "Website configured and saved successfully." 
     });
 
