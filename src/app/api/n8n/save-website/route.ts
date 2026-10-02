@@ -2,6 +2,16 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
 import { doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 
+// Helper function to mathematically calculate color brightness
+function getBrightness(hex: string) {
+  let cleanHex = hex.replace(/^#/, '');
+  if (cleanHex.length === 3) cleanHex = cleanHex.split('').map(c => c + c).join('');
+  const r = parseInt(cleanHex.slice(0, 2), 16) || 0;
+  const g = parseInt(cleanHex.slice(2, 4), 16) || 0;
+  const b = parseInt(cleanHex.slice(4, 6), 16) || 0;
+  return (r * 299 + g * 587 + b * 114) / 1000;
+}
+
 export async function POST(req: Request) {
   try {
     const { email, aiData, logoUrl } = await req.json();
@@ -10,68 +20,77 @@ export async function POST(req: Request) {
     const docId = email.toLowerCase().trim();
     const leadDocRef = doc(db, "leads", docId);
 
-    const pColor = aiData.primaryColor ? aiData.primaryColor : "#a35c38";
+    // -------------------------------------------------------------
+    // 🔥 SMART COLOR CONTRAST ENGINE
+    // -------------------------------------------------------------
+    let pColor = aiData.primaryColor ? aiData.primaryColor : "#a35c38";
+    
+    // If the AI provides pure white or a color that is way too light, text highlighting will be invisible on a white background. 
+    // We override it with a premium Deep Mocha/Charcoal.
+    if (getBrightness(pColor) > 230) {
+      pColor = "#2A2C2E"; 
+    }
+
+    const brightness = getBrightness(pColor);
+    const isPrimaryDark = brightness < 120;
+    const isPrimaryLight = brightness > 180;
+
     const darkText = "#1e0c05";
     const lightText = "#ffffff";
     const mutedText = "#625b5b";
     const bgLight = "#ffffff";
     const bgOffWhite = "#faf3ec";
 
-    // 🔥 1. GENERATE CLEAN BASE SLUG (e.g., "panola-poodles")
+    // Dynamic contrast rules to prevent invisible elements
+    const buttonTextColor = isPrimaryLight ? darkText : lightText;
+    const rightColTextColor = isPrimaryLight ? darkText : lightText;
+    
+    // Stats Banner is Dark (#1e0c05). If primary is also dark, stars & icons will vanish!
+    const statsBannerStarColor = isPrimaryDark ? "#FACC15" : pColor; // Gold stars if pColor is dark!
+    const statsBannerIconColor = isPrimaryDark ? lightText : pColor; // White icons if pColor is dark!
+
+
+    // -------------------------------------------------------------
+    // 🔥 1. GENERATE CLEAN BASE SLUG
+    // -------------------------------------------------------------
     let baseSlug = aiData.businessName
       .replace(/[^a-zA-Z0-9 ]/g, "")
       .trim()
       .replace(/\s+/g, "-")
       .toLowerCase();
       
-    // Prevent double dashes if there were weird characters
     baseSlug = baseSlug.replace(/-+/g, '-');
-
     let finalSlug = baseSlug;
 
-    // 🔥 2. CHECK IF SLUG ALREADY EXISTS IN FIREBASE
+    // 🔥 2. CHECK IF SLUG ALREADY EXISTS
     let slugSnap = await getDoc(doc(db, "websites", finalSlug));
 
     if (slugSnap.exists()) {
-      // If it exists, extract the City/Town from the address
       const addressString = aiData.address || "";
       const addressParts = addressString.split(',').map((p: string) => p.trim());
       
-      let locationModifier = "petcare"; // Fallback
-      
-      if (addressParts.length > 2) {
-        // "123 Main St", "Dallas", "TX" -> Grab "Dallas"
-        locationModifier = addressParts[1];
-      } else if (addressParts.length === 2) {
-        // "Dallas", "TX" -> Grab "Dallas"
-        locationModifier = addressParts[0];
-      } else if (addressParts.length === 1 && addressParts[0]) {
-        locationModifier = addressParts[0];
-      }
+      let locationModifier = "petcare"; 
+      if (addressParts.length > 2) locationModifier = addressParts[1];
+      else if (addressParts.length === 2) locationModifier = addressParts[0];
+      else if (addressParts.length === 1 && addressParts[0]) locationModifier = addressParts[0];
 
-      const cleanLocation = locationModifier
-        .replace(/[^a-zA-Z0-9 ]/g, "")
-        .trim()
-        .replace(/\s+/g, "-")
-        .toLowerCase();
-
+      const cleanLocation = locationModifier.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "-").toLowerCase();
       finalSlug = `${baseSlug}-${cleanLocation}`.replace(/-+/g, '-');
 
-      // Double-check just in case the business has multiple locations in the SAME city
       const doubleCheckSnap = await getDoc(doc(db, "websites", finalSlug));
-      if (doubleCheckSnap.exists()) {
-        finalSlug = `${finalSlug}-grooming`; 
-      }
+      if (doubleCheckSnap.exists()) finalSlug = `${finalSlug}-grooming`; 
     }
 
-    // 🔥 BUILD THE SPECIFIC websiteOneData STRUCTURE
+    // -------------------------------------------------------------
+    // 🔥 3. BUILD THE SPECIFIC websiteOneData STRUCTURE
+    // -------------------------------------------------------------
     const websiteOneData = {
       theme: { primaryColor: pColor },
       navbar: {
         section: { bg: bgLight, className: "" },
         logo: { src: logoUrl, alt: `${aiData.businessName} Logo`, className: "" },
         styling: { linkColor: mutedText, linkHoverColor: darkText },
-        cta: { label: aiData.navbarCta, href: "#contact", bg: pColor, text: lightText, className: "" },
+        cta: { label: aiData.navbarCta, href: "#contact", bg: pColor, text: buttonTextColor, className: "" },
         links: [
           { label: "Home", href: "#home", icon: "Home", className: "" },
           { label: "Gallery", href: "#gallery", icon: "Calendar", className: "" },
@@ -87,14 +106,15 @@ export async function POST(req: Request) {
         description: { text: aiData.heroDesc, color: darkText, className: "" },
         image: { src: `/demowebsite/homepageimage.avif`, className: "", imagecolor: pColor },
         mobileImage: { src: `/demowebsite/heropageimagesmallscreen.avif`, className: "", imagecolor: pColor },
-        cta: { label: aiData.heroCta, href: "#contact", bg: pColor, text: lightText, className: "" },
+        cta: { label: aiData.heroCta, href: "#contact", bg: pColor, text: buttonTextColor, className: "" },
         socialProof: { stars: 5, starColor: pColor, text: aiData.socialProof, textColor: darkText, className: "" }
       },
       statsBanner: {
         section: { bg: darkText, className: "" },
         heading: { text: aiData.statsHeading, color: "#fdfdfd", className: "" },
-        rating: { score: aiData.rating, max: "/5", scoreColor: "#fdfdfd", stars: 5, starColor: pColor, label: `5-Star Reviews: ${aiData.reviews}`, labelColor: bgLight, className: "" },
-        experience: { title: "Trusted Local Groomer", titleColor: "#fdfdfd", subtitle: aiData.address, subColor: bgLight, iconColor: pColor, className: "" }
+        // Applied Smart Contrast Here:
+        rating: { score: aiData.rating, max: "/5", scoreColor: "#fdfdfd", stars: 5, starColor: statsBannerStarColor, label: `5-Star Reviews: ${aiData.reviews}`, labelColor: bgLight, className: "" },
+        experience: { title: "Trusted Local Groomer", titleColor: "#fdfdfd", subtitle: aiData.address, subColor: bgLight, iconColor: statsBannerIconColor, className: "" }
       },
       imageSlider: {
         section: { bg: bgLight, className: "" },
@@ -126,7 +146,7 @@ export async function POST(req: Request) {
         description: { text: aiData.aboutDesc, color: mutedText, className: "" },
         image: { src: `/demowebsite/about.avif`, className: "", imagecolor: pColor },
         featuresList: { features: aiData.aboutFeatures, featureColor: darkText, featureIconColor: pColor, className: "" },
-        cta: { label: "More About Us", href: "#", bg: pColor, text: lightText, className: "" }
+        cta: { label: "More About Us", href: "#", bg: pColor, text: buttonTextColor, className: "" }
       },
       services: {
         section: { bg: bgOffWhite, className: "" },
@@ -139,7 +159,7 @@ export async function POST(req: Request) {
           { title: "Haircut & styling", description: "Custom cuts and fun styles that totally match your pet's unique vibe perfectly.", priceLabel: "Styling", iconKey: "scissor", href: "#contact", ctaLabel: "Book Now", className: "" },
           { title: "Nail trimming", description: "Safe and precise nail clipping to keep your pet comfortable and healthy always.", priceLabel: "Maintenance", iconKey: "nail", href: "#contact", ctaLabel: "Book Now", className: "" }
         ],
-        cta: { label: "View All Services", href: "#services", bg: pColor, text: lightText, className: "" }
+        cta: { label: "View All Services", href: "#services", bg: pColor, text: buttonTextColor, className: "" }
       },
       process: {
         section: { bg: bgLight, className: "" },
@@ -156,9 +176,10 @@ export async function POST(req: Request) {
         section: { bg: bgLight, className: "" },
         heading: { text: aiData.comparisonHeading, color: darkText, className: "" },
         description: { text: aiData.comparisonDesc, color: mutedText, className: "" },
-        vsBadge: { bg: pColor, text: lightText, className: "" },
+        vsBadge: { bg: pColor, text: buttonTextColor, className: "" },
         leftColumn: { bg: bgOffWhite, textColor: mutedText, iconColor: mutedText, offers: ["Untrained or uncertified staff", "Harsh chemicals and poor products", "Stressful, noisy pet environment", "No updates during your pet's session", "One-size-fits-all service packages", "Inconsistent results every visit"], className: "" },
-        rightColumn: { bg: pColor, textColor: lightText, iconColor: lightText, offers: ["Certified, professional groomers", "100% pet-safe, eco-friendly products", "Calm, welcoming, stress-free space", "Real-time session updates", "Flexible packages for your pet", "Premium quality every visit"], className: "" }
+        // Applied Smart Contrast Here:
+        rightColumn: { bg: pColor, textColor: rightColTextColor, iconColor: rightColTextColor, offers: ["Certified, professional groomers", "100% pet-safe, eco-friendly products", "Calm, welcoming, stress-free space", "Real-time session updates", "Flexible packages for your pet", "Premium quality every visit"], className: "" }
       },
       reviews: {
         section: { bg: bgLight, className: "" },
@@ -167,13 +188,13 @@ export async function POST(req: Request) {
         columns: {
           col1: [
             { type: "review", name: "David Chen", role: "Dog Owner", text: "“I was kinda nervous about taking Luna for grooming, but they totally relaxed her and made the experience enjoyable.”", avatar: `/demowebsite/person1.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor },
-            { type: "stat-numeric", score: aiData.rating, scale: "/5", subtext: `Trusted by ${aiData.reviews} owners`, bg: pColor, scoreColor: lightText, textColor: lightText, starColor: lightText }
+            { type: "stat-numeric", score: aiData.rating, scale: "/5", subtext: `Trusted by ${aiData.reviews} owners`, bg: pColor, scoreColor: rightColTextColor, textColor: rightColTextColor, starColor: rightColTextColor }
           ],
           col2: [
             { type: "review", name: "James Thornton", role: "Dog Owner", text: "“They truly transformed my golden retriever, Max! He looked amazing and was happy the whole time. Exceptional care.”", avatar: `/demowebsite/person2.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor }
           ],
           col3: [
-            { type: "stat-image", image: `/demowebsite/reviewcard.avif`, heading: "100%", subtext: "Satisfaction Guaranteed", bg: pColor, textColor: lightText, iconColor: lightText },
+            { type: "stat-image", image: `/demowebsite/reviewcard.avif`, heading: "100%", subtext: "Satisfaction Guaranteed", bg: pColor, textColor: rightColTextColor, iconColor: rightColTextColor },
             { type: "review", name: "Marcus Williams", role: "Cat Owner", text: "“As someone who owns three pets, I need a groomer I can fully trust. These guys are the absolute best.”", avatar: `/demowebsite/person3.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor }
           ]
         }
@@ -204,19 +225,19 @@ export async function POST(req: Request) {
         section: { bg: bgLight, className: "" },
         heading: { text: aiData.contactHeading, color: darkText, className: "" },
         description: { text: aiData.contactDesc, color: mutedText, className: "" },
-        button: { label: "Send Message", bg: pColor, text: lightText, className: "" }
+        button: { label: "Send Message", bg: pColor, text: buttonTextColor, className: "" }
       },
       ctaSection: {
         section: { bg: bgOffWhite, className: "" },
         heading: { text: aiData.finalCtaHeading, color: darkText, className: "" },
         description: { text: aiData.finalCtaDesc, color: mutedText, className: "" },
         image: { src: `/demowebsite/cta.avif`, className: "" },
-        cta: { label: "Book Appointment", href: "#contact", bg: pColor, text: lightText, className: "" }
+        cta: { label: "Book Appointment", href: "#contact", bg: pColor, text: buttonTextColor, className: "" }
       },
       footer: {
         section: { bg: "#fdfdfd", className: "" },
         logo: { src: logoUrl, alt: `${aiData.businessName} Logo`, className: "" },
-        styling: { textColor: darkText, mutedColor: mutedText, iconBg: pColor, iconText: lightText },
+        styling: { textColor: darkText, mutedColor: mutedText, iconBg: pColor, iconText: buttonTextColor },
         info: {
           address: aiData.address,
           phone: { label: "Contact Us", href: `#contact` },
@@ -228,7 +249,6 @@ export async function POST(req: Request) {
       }
     };
 
-    // 🔥 CREATE THE NEW WEBSITE DOCUMENT IN THE 'websites' COLLECTION
     const websiteDocData = {
       slug: finalSlug,
       ownerEmail: email,
@@ -244,13 +264,11 @@ export async function POST(req: Request) {
     const websiteDocRef = doc(db, "websites", finalSlug);
     await setDoc(websiteDocRef, websiteDocData);
 
-    // 🔥 UPDATE THE LEAD TO LINK IT TO THE NEW WEBSITE
     await updateDoc(leadDocRef, {
       websiteSlug: finalSlug,
       websiteGeneratedAt: new Date().toISOString()
     });
 
-    // Return the formatted sub-domain URL!
     return NextResponse.json({ 
       success: true, 
       slug: finalSlug, 
