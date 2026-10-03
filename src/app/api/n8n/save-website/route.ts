@@ -31,47 +31,53 @@ export async function POST(req: Request) {
     const docId = email.toLowerCase().trim();
     const leadDocRef = doc(db, "leads", docId);
 
-    // 🔥 FETCH REAL DATA DIRECTLY FROM THE DATABASE (Phone, Facebook, Instagram)
+    // 🔥 FETCH REAL DATA DIRECTLY FROM THE DATABASE
     const leadDocSnap = await getDoc(leadDocRef);
     let realPhone = "Contact Us";
     let realFacebook = "#";
     let realInstagram = "#";
     let realAddress = aiData.address;
+    
+    // Default Secondary color to whatever Gemini picked for Primary
+    let pColor = aiData.primaryColor ? aiData.primaryColor.trim().toUpperCase() : "#2A2C2E";
+    let sColor = pColor; 
 
     if (leadDocSnap.exists()) {
       const dbData = leadDocSnap.data();
       
-      // Grab real phone
       if (dbData.Phone) realPhone = dbData.Phone;
       else if (dbData.facebookphone) realPhone = dbData.facebookphone;
 
-      // Grab real Facebook
       const fbRaw = dbData.Facebook || dbData.facebookurl || dbData.aifacebook || dbData["extracted facebook"];
       if (fbRaw && fbRaw.trim() !== "") {
         realFacebook = fbRaw.startsWith("http") ? fbRaw : `https://www.facebook.com/${fbRaw}`;
       }
 
-      // Grab real Instagram
       const igRaw = dbData.Instagram;
       if (igRaw && igRaw.trim() !== "") {
         realInstagram = igRaw.startsWith("http") ? igRaw : `https://${igRaw}`;
       }
       
-      // Ensure address is accurate
       if (!realAddress || realAddress.trim() === "") {
         realAddress = dbData.Address || dbData.facebookaddress || "";
       }
+
+      // 🔥 EXTRACT SECONDARY COLOR FOR TWO-TONE DESIGN
+      if (dbData.secondary && dbData.secondary.trim() !== "") {
+        const extractedSec = dbData.secondary.trim().toUpperCase();
+        // Ignore it if the secondary color is just pure black or white
+        if (extractedSec !== "#FFFFFF" && extractedSec !== "#FFFFFE" && extractedSec !== "#000000" && extractedSec !== "#010101") {
+          sColor = extractedSec;
+        }
+      }
     }
 
-    // Format Phone for href (strip non-numbers)
     const phoneHref = realPhone !== "Contact Us" ? `tel:${realPhone.replace(/[^0-9+]/g, '')}` : "#contact";
 
-    // 🔥 COLOR ENGINE & FALLBACKS
-    let pColor = aiData.primaryColor ? aiData.primaryColor.trim().toUpperCase() : "#2A2C2E";
-    
     // Prevent pure White or pure Black as primary
     if (pColor === "#FFFFFF" || pColor === "#FFFFFE" || pColor === "#000000" || pColor === "#010101") {
       pColor = "#2A2C2E"; 
+      sColor = "#2A2C2E"; // Reset secondary if primary was invalid
     }
 
     const darkText = "#1e0c05";
@@ -80,8 +86,12 @@ export async function POST(req: Request) {
     const bgLight = "#ffffff";
     const bgOffWhite = "#faf3ec";
 
+    // Calculate contrasts for text on top of Primary and Secondary colored buttons/badges
     const btnTextColor = getContrastColor(pColor);
-    const darkBgIconColor = isDarkColor(pColor) ? "#ffffff" : pColor;
+    const secTextColor = getContrastColor(sColor);
+    
+    // For Stats Banner (Dark Background) - if the secondary color is dark, make it white so it doesn't vanish
+    const darkBgIconColor = isDarkColor(sColor) ? "#ffffff" : sColor;
 
     // 🔥 GENERATE UNIQUE SLUG
     let baseSlug = aiData.businessName.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "-").toLowerCase();
@@ -105,9 +115,10 @@ export async function POST(req: Request) {
       if (doubleCheckSnap.exists()) finalSlug = `${finalSlug}-grooming`; 
     }
 
+    // Forcefully remove backticks from Stats Banner to fix the text issue
     const safeStatsHeading = aiData.statsHeading ? aiData.statsHeading.replace(/`/g, '') : "Our Commitment to Pet Wellness";
 
-    // 🔥 BUILD THE PERFECT, FULLY-STYLED JSON STRUCTURE
+    // 🔥 BUILD THE PERFECT TWO-TONE, FULLY-STYLED JSON STRUCTURE
     const websiteOneData = {
       theme: { primaryColor: pColor },
       navbar: {
@@ -128,16 +139,16 @@ export async function POST(req: Request) {
         section: { bg: bgLight, className: "" },
         heading: { text: aiData.heroHeading, color: darkText, className: "" },
         description: { text: aiData.heroDesc, color: darkText, className: "" },
-        image: { src: `https://nexpetcare.com/demowebsite/homepageimage.avif`, className: "", imagecolor: pColor },
+        image: { src: `https://nexpetcare.com/demowebsite/homepageimage.avif`, className: "", imagecolor: pColor }, // Primary for big BG shape
         mobileImage: { src: `https://nexpetcare.com/demowebsite/heropageimagesmallscreen.avif`, className: "", imagecolor: pColor },
         cta: { label: aiData.heroCta, href: "#contact", bg: pColor, text: btnTextColor, className: "" },
-        socialProof: { stars: 5, starColor: pColor, text: aiData.socialProof, textColor: darkText, className: "" }
+        socialProof: { stars: 5, starColor: sColor, text: aiData.socialProof, textColor: darkText, className: "" } // Secondary for stars!
       },
       statsBanner: {
         section: { bg: darkText, className: "" }, 
-        heading: { text: safeStatsHeading, color: "#fdfdfd", className: "" }, 
-        rating: { score: aiData.rating, max: "/5", scoreColor: "#fdfdfd", stars: 5, starColor: darkBgIconColor, label: `5-Star Reviews: ${aiData.reviews}`, labelColor: bgLight, className: "" },
-        experience: { title: "Trusted Local Groomer", titleColor: "#fdfdfd", subtitle: realAddress, subColor: bgLight, iconColor: darkBgIconColor, className: "" }
+        heading: { text: safeStatsHeading, color: "#fdfdfd", className: "" }, // No backticks!
+        rating: { score: aiData.rating, max: "/5", scoreColor: "#fdfdfd", stars: 5, starColor: darkBgIconColor, label: `5-Star Reviews: ${aiData.reviews}`, labelColor: bgLight, className: "" }, // Secondary for stars!
+        experience: { title: "Trusted Local Groomer", titleColor: "#fdfdfd", subtitle: realAddress, subColor: bgLight, iconColor: darkBgIconColor, className: "" } // Secondary for Icon!
       },
       imageSlider: {
         section: { bg: bgLight, className: "" },
@@ -156,7 +167,7 @@ export async function POST(req: Request) {
         section: { bg: bgLight, className: "" },
         heading: { text: aiData.galleryHeading, color: darkText, className: "" },
         description: { text: aiData.galleryDesc, color: mutedText, className: "" },
-        styling: { arrowColor: pColor, badgeBg: bgOffWhite, badgeText: darkText, className: "" },
+        styling: { arrowColor: sColor, badgeBg: bgOffWhite, badgeText: darkText, className: "" }, // Secondary for Slider Arrows!
         items: [
           { id: 1, before: `https://nexpetcare.com/demowebsite/b1.avif`, after: `https://nexpetcare.com/demowebsite/a1.avif`, alt: "Dog grooming", className: "" },
           { id: 2, before: `https://nexpetcare.com/demowebsite/b2.avif`, after: `https://nexpetcare.com/demowebsite/a2.avif`, alt: "Cat grooming", className: "" },
@@ -168,14 +179,14 @@ export async function POST(req: Request) {
         heading: { text: aiData.aboutHeading, color: darkText, className: "" },
         description: { text: aiData.aboutDesc, color: mutedText, className: "" },
         image: { src: `https://nexpetcare.com/demowebsite/about.avif`, className: "", imagecolor: pColor },
-        featuresList: { features: aiData.aboutFeatures, featureColor: darkText, featureIconColor: pColor, className: "" },
+        featuresList: { features: aiData.aboutFeatures, featureColor: darkText, featureIconColor: sColor, className: "" }, // Secondary for checkmarks!
         cta: { label: "More About Us", href: "#", bg: pColor, text: btnTextColor, className: "" }
       },
       services: {
         section: { bg: bgOffWhite, className: "" },
         heading: { text: aiData.servicesHeading, color: darkText, className: "" },
         description: { text: aiData.servicesDesc, color: mutedText, className: "" },
-        styling: { cardBg: bgLight, cardBorder: "#ece5de", iconColor: pColor, titleColor: darkText, priceColor: darkText, className: "" },
+        styling: { cardBg: bgLight, cardBorder: "#ece5de", iconColor: sColor, titleColor: darkText, priceColor: darkText, className: "" }, // Secondary for Service Icons!
         items: [
           { title: "Full body grooming", description: "Complete pampering from head to tail—bath, dry, trim, and style all taken care of.", priceLabel: "Premium Care", iconKey: "grooming", href: "#contact", ctaLabel: "Book Now", className: "" },
           { title: "Bath & blow dry", description: "Deep cleansing bath premium a professional blow dry finish included.", priceLabel: "Refresh", iconKey: "bath", href: "#contact", ctaLabel: "Book Now", className: "" },
@@ -188,7 +199,7 @@ export async function POST(req: Request) {
         section: { bg: bgLight, className: "" },
         heading: { text: aiData.processHeading, color: darkText, className: "" },
         description: { text: aiData.processDesc, color: mutedText, className: "" },
-        styling: { lineColor: pColor, className: "" },
+        styling: { lineColor: sColor, className: "" }, // Secondary for the connecting line!
         steps: [
           { id: "01", title: "Book your appointment", titleColor: darkText, description: "Pick the service you want and book a convenient time.", descColor: mutedText, image: `https://nexpetcare.com/demowebsite/step1.avif`, className: "" },
           { id: "02", title: "Drop off your pet", titleColor: darkText, description: "Drop by our friendly studio with your pet at your appointment time.", descColor: mutedText, image: `https://nexpetcare.com/demowebsite/step2.avif`, className: "" },
@@ -199,8 +210,7 @@ export async function POST(req: Request) {
         section: { bg: bgLight, className: "" },
         heading: { text: aiData.comparisonHeading, color: darkText, className: "" },
         description: { text: aiData.comparisonDesc, color: mutedText, className: "" },
-        // 🔥 HIGH CONTRAST VS BADGE FIX: Dark Background, White Text
-        vsBadge: { bg: darkText, text: "#ffffff", className: "" },
+        vsBadge: { bg: sColor, text: secTextColor, className: "" }, // Secondary for the VS circle!
         leftColumn: { bg: bgOffWhite, textColor: mutedText, iconColor: mutedText, offers: ["Untrained or uncertified staff", "Harsh chemicals and poor products", "Stressful, noisy pet environment", "No updates during your pet's session", "One-size-fits-all service packages", "Inconsistent results every visit"], className: "" },
         rightColumn: { bg: pColor, textColor: btnTextColor, iconColor: btnTextColor, offers: ["Certified, professional groomers", "100% pet-safe, eco-friendly products", "Calm, welcoming, stress-free space", "Real-time session updates", "Flexible packages for your pet", "Premium quality every visit"], className: "" }
       },
@@ -210,15 +220,15 @@ export async function POST(req: Request) {
         description: { text: aiData.reviewsDesc, color: mutedText, className: "" },
         columns: {
           col1: [
-            { type: "review", name: "David Chen", role: "Dog Owner", text: "“I was kinda nervous about taking Luna for grooming, but they totally relaxed her and made the experience enjoyable.”", avatar: `https://nexpetcare.com/demowebsite/person1.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor },
+            { type: "review", name: "David Chen", role: "Dog Owner", text: "“I was kinda nervous about taking Luna for grooming, but they totally relaxed her and made the experience enjoyable.”", avatar: `https://nexpetcare.com/demowebsite/person1.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: sColor },
             { type: "stat-numeric", score: aiData.rating, scale: "/5", subtext: `Trusted by ${aiData.reviews} owners`, bg: pColor, scoreColor: btnTextColor, textColor: btnTextColor, starColor: btnTextColor }
           ],
           col2: [
-            { type: "review", name: "James Thornton", role: "Dog Owner", text: "“They truly transformed my golden retriever, Max! He looked amazing and was happy the whole time. Exceptional care.”", avatar: `https://nexpetcare.com/demowebsite/person2.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor }
+            { type: "review", name: "James Thornton", role: "Dog Owner", text: "“They truly transformed my golden retriever, Max! He looked amazing and was happy the whole time. Exceptional care.”", avatar: `https://nexpetcare.com/demowebsite/person2.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: sColor }
           ],
           col3: [
             { type: "stat-image", image: `https://nexpetcare.com/demowebsite/reviewcard.avif`, heading: "100%", subtext: "Satisfaction Guaranteed", bg: pColor, textColor: btnTextColor, iconColor: btnTextColor },
-            { type: "review", name: "Marcus Williams", role: "Cat Owner", text: "“As someone who owns three pets, I need a groomer I can fully trust. These guys are the absolute best.”", avatar: `https://nexpetcare.com/demowebsite/person3.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: pColor }
+            { type: "review", name: "Marcus Williams", role: "Cat Owner", text: "“As someone who owns three pets, I need a groomer I can fully trust. These guys are the absolute best.”", avatar: `https://nexpetcare.com/demowebsite/person3.webp`, bg: bgOffWhite, textColor: mutedText, titleColor: darkText, starColor: sColor }
           ]
         }
       },
@@ -237,7 +247,7 @@ export async function POST(req: Request) {
         section: { bg: bgOffWhite, className: "" },
         heading: { text: aiData.faqHeading, color: darkText, className: "" },
         description: { text: aiData.faqDesc, color: mutedText, className: "" },
-        styling: { questionColor: darkText, answerColor: mutedText, iconColor: pColor, dividerColor: "#ece5de", className: "" },
+        styling: { questionColor: darkText, answerColor: mutedText, iconColor: sColor, dividerColor: "#ece5de", className: "" }, // Secondary for FAQ Plus/Minus!
         items: [
           { question: "Do you use sedation or anesthesia?", answer: "No! We use a completely natural, gentle approach using calming techniques to keep your pet relaxed and comfortable.", className: "" },
           { question: "How long does the appointment take?", answer: "A standard appointment takes about 45 to 60 minutes, but we never rush. If your pet needs more time to relax, we give it to them.", className: "" },
@@ -258,11 +268,11 @@ export async function POST(req: Request) {
         cta: { label: "Book Appointment", href: "#contact", bg: pColor, text: btnTextColor, className: "" }
       },
       
-      // 🔥 HIGHLY CUSTOMIZED FOOTER WITH REAL DATABASE LINKS AND MAP
+      // 🔥 HIGHLY CUSTOMIZED TWO-TONE FOOTER 
       footer: {
         section: { bg: "#fdfdfd", className: "" },
         logo: { src: logoUrl, alt: `${aiData.businessName} Logo`, className: "" },
-        styling: { textColor: darkText, mutedColor: mutedText, iconBg: pColor, iconText: btnTextColor },
+        styling: { textColor: darkText, mutedColor: mutedText, iconBg: sColor, iconText: secTextColor }, // Secondary for social circles!
         disclaimer: "The information provided on this website is for general informational purposes only. We are dedicated to providing the highest quality care, but please consult with our staff regarding your pet's specific health and grooming needs.",
         quickLinks: [
           { label: "Home", href: "#home" },
@@ -280,9 +290,7 @@ export async function POST(req: Request) {
           address: realAddress,
           phone: { label: realPhone, href: phoneHref },
           email: { label: email, href: `mailto:${email}` },
-          // 🔥 REAL EMBED URL INJECTED HERE
           mapEmbedUrl: "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d79843.50769875153!2d2.2482248676731413!3d48.85836229464928!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x47e66e2964e34e2d%3A0x8ddca9ee380ef7e0!2sEiffel%20Tower!5e1!3m2!1sen!2sin!4v1790962482457!5m2!1sen!2sin",
-          // 🔥 STOREFRONT IMAGE UPDATED
           storefrontImage: { src: "https://nexpetcare.com/demowebsite/storeimage.avif" }
         },
         copyright: `Copyright © ${new Date().getFullYear()} ${aiData.businessName}. All rights reserved.`,
