@@ -9,7 +9,7 @@ export default function PushDataPage() {
   const [loading, setLoading] = useState(false);
   const [log, setLog] = useState<string[]>([]);
 
-  
+
 
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -38,7 +38,7 @@ export default function PushDataPage() {
 
       setLog(prev => [...prev, `Found ${data.length} records. Beginning optimized batch upload...`]);
 
-      const CHUNK_SIZE = 500; 
+      const CHUNK_SIZE = 500;
       let processedCount = 0;
 
       for (let i = 0; i < data.length; i += CHUNK_SIZE) {
@@ -52,9 +52,9 @@ export default function PushDataPage() {
           } else if (item.Email) {
             docId = String(item.Email).toLowerCase().trim();
           }
-          
-          const docRef = doc(db, "leads", docId);
-          
+
+          const docRef = doc(db, "websites", docId);
+
           // 🔥 BULLETPROOF AUTO-APPROVE LOGIC
           let finalStatus = "pending";
           if (item.logoUrl) {
@@ -98,8 +98,8 @@ export default function PushDataPage() {
       <p className="text-gray-500 mb-8">Upload your CSV or JSON output. Leads with a valid logoUrl will be Auto-Approved.</p>
 
       <div className="w-full max-w-2xl bg-white border-2 border-dashed border-gray-300 rounded-xl p-12 text-center relative hover:bg-gray-50 transition-colors shadow-sm">
-        <input 
-          type="file" 
+        <input
+          type="file"
           accept=".json,.csv"
           onChange={handleFileUpload}
           disabled={loading}

@@ -474,7 +474,7 @@ export async function uploadCustomLogo(docId: string, formData: FormData) {
       if (res.colors.tertiary) tertiary = res.colors.tertiary;
     }
 
-    await updateDoc(doc(db, "leads", docId), { logoUrl: res.url, primary: primary, secondary: secondary, tertiary: tertiary });
+    await updateDoc(doc(db, "websites", docId), { logoUrl: res.url, primary: primary, secondary: secondary, tertiary: tertiary });
     return { success: true, url: res.url };
   } catch (e: any) {
     return { success: false, error: e.message };
@@ -498,7 +498,7 @@ export async function manualRemoveBackground(docId: string, imageUrl: string) {
       if (res.colors.tertiary) tertiary = res.colors.tertiary;
     }
 
-    await updateDoc(doc(db, "leads", docId), { logoUrl: res.url, primary: primary, secondary: secondary, tertiary: tertiary });
+    await updateDoc(doc(db, "websites", docId), { logoUrl: res.url, primary: primary, secondary: secondary, tertiary: tertiary });
     return { success: true, url: res.url };
   } catch (e: any) {
     return { success: false, error: e.message };

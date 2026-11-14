@@ -132,7 +132,7 @@ export async function getPendingLeads() {
 
 export async function updateFirebaseLogoStatus(docId: string, newStatus: string) {
   try {
-    await updateDoc(doc(db, "leads", docId), { logoStatus: newStatus });
+    await updateDoc(doc(db, "websites", docId), { logoStatus: newStatus });
     return { success: true };
   } catch (error) {
     return { success: false, error: 'Failed to update status' };
@@ -141,7 +141,7 @@ export async function updateFirebaseLogoStatus(docId: string, newStatus: string)
 
 export async function updateFirebaseLogoUrl(docId: string, newUrl: string) {
   try {
-    await updateDoc(doc(db, "leads", docId), { logoUrl: newUrl });
+    await updateDoc(doc(db, "websites", docId), { logoUrl: newUrl });
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message };
@@ -157,7 +157,7 @@ export async function uploadAndReplaceLogoFirebase(docId: string, formData: Form
 
     // Apply standard padding & formatting on manual upload
     const cleanUrl = cloudinaryData.url.replace('/upload/', '/upload/w_600,h_600,c_pad,g_auto,f_avif,q_auto:best/');
-    await updateDoc(doc(db, "leads", docId), { logoUrl: cleanUrl });
+    await updateDoc(doc(db, "websites", docId), { logoUrl: cleanUrl });
 
     return { success: true, newUrl: cleanUrl };
   } catch (error: any) {
@@ -174,7 +174,7 @@ export async function uploadAndReplaceLogoFromUrlFirebase(docId: string, imageUr
     const cloudinaryData = await uploadBufferToCloudinary(buffer, docId, 'logos');
 
     const cleanUrl = cloudinaryData.url.replace('/upload/', '/upload/w_600,h_600,c_pad,g_auto,f_avif,q_auto:best/');
-    await updateDoc(doc(db, "leads", docId), { logoUrl: cleanUrl });
+    await updateDoc(doc(db, "websites", docId), { logoUrl: cleanUrl });
 
     return { success: true, newUrl: cleanUrl };
   } catch (error: any) {
@@ -189,7 +189,7 @@ export async function removeLogoBackgroundFirebase(docId: string, currentUrl: st
 
     // Apply formatting to output
     const cleanUrl = cloudinaryData.url.replace('/upload/', '/upload/w_600,h_600,c_pad,g_auto,f_avif,q_auto:best/');
-    await updateDoc(doc(db, "leads", docId), { logoUrl: cleanUrl });
+    await updateDoc(doc(db, "websites", docId), { logoUrl: cleanUrl });
 
     return { success: true, newUrl: cleanUrl };
   } catch (error: any) {
@@ -212,7 +212,7 @@ export async function autoProcessNextSuccessRecordFirebase() {
     const docSnapshot = snapshot.docs[0];
     const targetItem = docSnapshot.data();
     docId = docSnapshot.id;
-    const docRef = doc(db, "leads", docId);
+    const docRef = doc(db, "websites", docId);
 
     if (!targetItem.logoUrl || targetItem.logoUrl.trim() === "" || isBadLogo(targetItem)) {
       const fbRawUrl = targetItem.Facebook || targetItem.facebookurl || targetItem.aifacebook || targetItem["extracted facebook"];
@@ -283,7 +283,7 @@ export async function autoProcessNextSuccessRecordFirebase() {
 
   } catch (error: any) {
     console.error('Auto Process Error:', error);
-    if (docId) await updateDoc(doc(db, "leads", docId), { logoStatus: "manual_review" });
+    if (docId) await updateDoc(doc(db, "websites", docId), { logoStatus: "manual_review" });
     return { status: 'error', message: `Failed: ${error.message}` };
   }
 }

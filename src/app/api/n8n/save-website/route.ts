@@ -10,7 +10,7 @@ function getContrastColor(hexColor: string) {
   const g = parseInt(hex.substr(2, 2), 16) || 0;
   const b = parseInt(hex.substr(4, 2), 16) || 0;
   const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
-  return (yiq >= 128) ? "#1e0c05" : "#ffffff"; 
+  return (yiq >= 128) ? "#1e0c05" : "#ffffff";
 }
 
 function isDarkColor(hexColor: string) {
@@ -20,7 +20,7 @@ function isDarkColor(hexColor: string) {
   const g = parseInt(hex.substr(2, 2), 16) || 0;
   const b = parseInt(hex.substr(4, 2), 16) || 0;
   const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
-  return yiq < 128; 
+  return yiq < 128;
 }
 
 export async function POST(req: Request) {
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     if (!email || !aiData) return NextResponse.json({ success: false, error: "Missing data" }, { status: 400 });
 
     const docId = email.toLowerCase().trim();
-    const leadDocRef = doc(db, "leads", docId);
+    const leadDocRef = doc(db, "websites", docId);
 
     // 🔥 FETCH REAL DATA DIRECTLY FROM THE DATABASE (Phone, Facebook, Instagram)
     const leadDocSnap = await getDoc(leadDocRef);
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
 
     if (leadDocSnap.exists()) {
       const dbData = leadDocSnap.data();
-      
+
       // Grab real phone
       if (dbData.Phone) realPhone = dbData.Phone;
       else if (dbData.facebookphone) realPhone = dbData.facebookphone;
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
       if (igRaw && igRaw.trim() !== "") {
         realInstagram = igRaw.startsWith("http") ? igRaw : `https://${igRaw}`;
       }
-      
+
       // Ensure address is accurate
       if (!realAddress || realAddress.trim() === "") {
         realAddress = dbData.Address || dbData.facebookaddress || "";
@@ -68,10 +68,10 @@ export async function POST(req: Request) {
 
     // 🔥 COLOR ENGINE & FALLBACKS
     let pColor = aiData.primaryColor ? aiData.primaryColor.trim().toUpperCase() : "#2A2C2E";
-    
+
     // Prevent pure White or pure Black as primary
     if (pColor === "#FFFFFF" || pColor === "#FFFFFE" || pColor === "#000000" || pColor === "#010101") {
-      pColor = "#2A2C2E"; 
+      pColor = "#2A2C2E";
     }
 
     const darkText = "#1e0c05";
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
     if (slugSnap.exists()) {
       const addressString = realAddress || "";
       const addressParts = addressString.split(',').map((p: string) => p.trim());
-      let locationModifier = "petcare"; 
+      let locationModifier = "petcare";
       if (addressParts.length > 2) locationModifier = addressParts[1];
       else if (addressParts.length === 2) locationModifier = addressParts[0];
       else if (addressParts.length === 1 && addressParts[0]) locationModifier = addressParts[0];
@@ -102,7 +102,7 @@ export async function POST(req: Request) {
       finalSlug = `${baseSlug}-${cleanLocation}`.replace(/-+/g, '-');
 
       const doubleCheckSnap = await getDoc(doc(db, "websites", finalSlug));
-      if (doubleCheckSnap.exists()) finalSlug = `${finalSlug}-grooming`; 
+      if (doubleCheckSnap.exists()) finalSlug = `${finalSlug}-grooming`;
     }
 
     const safeStatsHeading = aiData.statsHeading ? aiData.statsHeading.replace(/`/g, '') : "Our Commitment to Pet Wellness";
@@ -134,8 +134,8 @@ export async function POST(req: Request) {
         socialProof: { stars: 5, starColor: pColor, text: aiData.socialProof, textColor: darkText, className: "" }
       },
       statsBanner: {
-        section: { bg: darkText, className: "" }, 
-        heading: { text: safeStatsHeading, color: "#fdfdfd", className: "" }, 
+        section: { bg: darkText, className: "" },
+        heading: { text: safeStatsHeading, color: "#fdfdfd", className: "" },
         rating: { score: aiData.rating, max: "/5", scoreColor: "#fdfdfd", stars: 5, starColor: darkBgIconColor, label: `5-Star Reviews: ${aiData.reviews}`, labelColor: bgLight, className: "" },
         experience: { title: "Trusted Local Groomer", titleColor: "#fdfdfd", subtitle: realAddress, subColor: bgLight, iconColor: darkBgIconColor, className: "" }
       },
@@ -257,7 +257,7 @@ export async function POST(req: Request) {
         image: { src: `https://nexpetcare.com/demowebsite/cta.avif`, className: "" },
         cta: { label: "Book Appointment", href: "#contact", bg: pColor, text: btnTextColor, className: "" }
       },
-      
+
       // 🔥 HIGHLY CUSTOMIZED FOOTER WITH REAL DATABASE LINKS AND MAP
       footer: {
         section: { bg: "#fdfdfd", className: "" },
@@ -312,11 +312,11 @@ export async function POST(req: Request) {
       websiteGeneratedAt: new Date().toISOString()
     });
 
-    return NextResponse.json({ 
-      success: true, 
-      slug: finalSlug, 
+    return NextResponse.json({
+      success: true,
+      slug: finalSlug,
       url: `${finalSlug}.nexpetcare.com`,
-      message: "Website configured and saved successfully." 
+      message: "Website configured and saved successfully."
     });
 
   } catch (error: any) {

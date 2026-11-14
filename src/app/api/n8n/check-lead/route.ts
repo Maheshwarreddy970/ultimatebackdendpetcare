@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     if (!email) return NextResponse.json({ success: false, error: "Email required" }, { status: 400 });
 
     const docId = email.toLowerCase().trim();
-    const docRef = doc(db, "leads", docId);
+    const docRef = doc(db, "websites", docId);
     const docSnap = await getDoc(docRef);
 
     if (!docSnap.exists()) {
