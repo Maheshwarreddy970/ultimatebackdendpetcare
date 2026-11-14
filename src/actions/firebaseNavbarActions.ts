@@ -125,7 +125,7 @@ function isBadLogo(item: any): boolean {
 }
 
 export async function getPendingLeads() {
-  const q = query(collection(db, "leads"), where("logoStatus", "==", "pending"), limit(50));
+  const q = query(collection(db, "websites"), where("logoStatus", "==", "pending"), limit(50));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
 }
@@ -204,7 +204,7 @@ export async function removeLogoBackgroundFirebase(docId: string, currentUrl: st
 export async function autoProcessNextSuccessRecordFirebase() {
   let docId: string | undefined;
   try {
-    const q = query(collection(db, "leads"), where("logoStatus", "==", "pending"), limit(1));
+    const q = query(collection(db, "websites"), where("logoStatus", "==", "pending"), limit(1));
     const snapshot = await getDocs(q);
 
     if (snapshot.empty) return { status: 'complete', message: 'No more pending records.' };

@@ -2,12 +2,12 @@ import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, getCountFromServer } from 'firebase/firestore';
 import JsonNavbarReviewCard from '@/components/JsonNavbarReviewCard';
 
-export const dynamic = 'force-dynamic'; 
+export const dynamic = 'force-dynamic';
 
 async function getReviewLeadsCount(): Promise<number> {
   try {
     // 🔥 Fetch BOTH pending and manual_review leads directly
-    const q = query(collection(db, "leads"), where("logoStatus", "in", ["pending", "manual_review"]));
+    const q = query(collection(db, "websites"), where("logoStatus", "in", ["pending", "manual_review"]));
     const snapshot = await getCountFromServer(q);
     return snapshot.data().count;
   } catch (error) {
@@ -17,7 +17,7 @@ async function getReviewLeadsCount(): Promise<number> {
 
 // 🔥 Fetch all unapproved leads at once
 async function getReviewLeads() {
-  const q = query(collection(db, "leads"), where("logoStatus", "in", ["pending", "manual_review"]));
+  const q = query(collection(db, "websites"), where("logoStatus", "in", ["pending", "manual_review"]));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
 }
@@ -32,7 +32,7 @@ export default async function FirebaseNavbarPage() {
     <main className="min-h-screen pb-20 bg-gray-50">
       <div className="w-full text-center py-8">
         <h1 className="text-3xl font-bold">Manual Review Dashboard</h1>
-        
+
         <div className="mt-3 flex items-center justify-center gap-2">
           <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-semibold text-sm shadow-sm">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
@@ -50,9 +50,9 @@ export default async function FirebaseNavbarPage() {
           </div>
         ) : (
           displayItems.map((item, index) => (
-            <JsonNavbarReviewCard 
-              key={`card-${item.id}-${index}`} 
-              item={item} 
+            <JsonNavbarReviewCard
+              key={`card-${item.id}-${index}`}
+              item={item}
             />
           ))
         )}

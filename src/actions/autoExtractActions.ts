@@ -383,7 +383,7 @@ export async function uploadBufferToCloudinaryPublic(buffer: Buffer, publicId: s
 // ---------------------------------------------------------
 export async function autoExtractBatch(batchSize: number = 10) {
   try {
-    const q = query(collection(db, "leads"), where("logoStatus", "==", "pending"), limit(batchSize));
+    const q = query(collection(db, "websites"), where("logoStatus", "==", "pending"), limit(batchSize));
     const snapshot = await getDocs(q);
 
     if (snapshot.empty) return { status: 'complete', messages: ['🎉 No more pending records to extract.'] };
