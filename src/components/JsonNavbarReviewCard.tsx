@@ -16,6 +16,8 @@ interface FirebaseLeadItem {
   "extracted facebook"?: string;
   facebookname?: string;
   Instagram?: string;
+  websiteOneData?: any; // Added to catch nested JSON
+  websiteTwoData?: any; // Added to catch nested JSON
   [key: string]: any;
 }
 
@@ -23,7 +25,15 @@ export default function JsonNavbarReviewCard({ item }: { item: FirebaseLeadItem 
   const [isBlack, setIsBlack] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
   
-  const [localLogoUrl, setLocalLogoUrl] = useState(item.logoUrl || "");
+  // Dig into the nested JSON to find the logo if the root logoUrl is empty
+  const extractedLogo = item.logoUrl 
+    || item?.websiteOneData?.navbar?.logo?.src 
+    || item?.websiteOneData?.logo?.src
+    || item?.websiteTwoData?.navbar?.logo?.src
+    || item?.websiteTwoData?.logo?.src
+    || "";
+
+  const [localLogoUrl, setLocalLogoUrl] = useState(extractedLogo);
 
   if (!item || !isVisible) return null;
 
@@ -34,7 +44,6 @@ export default function JsonNavbarReviewCard({ item }: { item: FirebaseLeadItem 
   const fbLink = item.Facebook || item.facebookurl || item.aifacebook || item["extracted facebook"] || "";
   const igLink = item.Instagram || "";
   
-  // Extract the best available business name for the "Use Text" generator
   const businessName = item.Name || item.facebookname || "Pet Grooming";
 
   return (
@@ -50,13 +59,14 @@ export default function JsonNavbarReviewCard({ item }: { item: FirebaseLeadItem 
           <Navbar logoUrl={displayLogo} url={item.Website || ""} fbLink={fbLink} igLink={igLink} />
         </div>
         
+        {/* Pass the nested structure down so your buttons can update Firebase */}
         <JsonReviewButtons
           docId={item.id} 
-          businessName={businessName} // <-- PASSED TO BUTTONS
+          businessName={businessName} 
           currentStatus={item.logoStatus}
           currentUrl={localLogoUrl} 
           onToggleBlack={setIsBlack}
-          onProcessComplete={() => setIsVisible(false)} 
+          onProcessComplete={() => setIsVisible(false)} // Hides card on manual approval
           onUpdateLogo={(newUrl: string) => setLocalLogoUrl(newUrl)} 
         />
       </div>
