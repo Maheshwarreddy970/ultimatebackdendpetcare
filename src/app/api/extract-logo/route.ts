@@ -8,20 +8,30 @@ import sharp from 'sharp';
 // NEW CLOUDINARY CONFIG
 // ---------------------------------------------------------
 cloudinary.config({
-  cloud_name: 'ta5klglv',
-  api_key: '228386464312455',
-  api_secret: 'pIoksKtT9h6ez0k3KhbcwjAoU7o',
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
 
 // ---------------------------------------------------------
 // APIFY TOKEN ROTATION
 // ---------------------------------------------------------
 const APIFY_TOKENS = [
-  'apify_api_zP6UkcgE9nEdRfvtxgfH9C9S9VG50G26Ch4U',
-  'apify_api_NkPekUe1mhtcpLovU8fKmQPxFDj5oM4q00FG',
-  'apify_api_Z3q3Jydg3u2k1TM4ELrWYcIUIa4hJC12BcNW',
-  'apify_api_SoNIAG1xuFYPPzs3eZEenIedgryI7a3xcivO'
-];
+  process.env.APIFY_TOKEN_1,
+  process.env.APIFY_TOKEN_2,
+  process.env.APIFY_TOKEN_3,
+  process.env.APIFY_TOKEN_4,
+  process.env.APIFY_TOKEN_5,
+  process.env.APIFY_TOKEN_6,
+  process.env.APIFY_TOKEN_7,
+  process.env.APIFY_TOKEN_8,
+  process.env.APIFY_TOKEN_9,
+  process.env.APIFY_TOKEN_10,
+  process.env.APIFY_TOKEN_11,
+  process.env.APIFY_TOKEN_12,
+].filter(Boolean);
+
 let currentApifyIndex = 0;
 
 const BANNED_KEYWORDS = ['facebook', 'instagram', 'twitter', 'linkedin', 'tiktok', 'youtube', 'pinterest', 'google', 'placeholder', 'spinner', 'flag'];
@@ -62,7 +72,7 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
       return { buffer, type: 'transparent' };
     }
 
-    const colorDist = (c1: number[], c2: number[]) => 
+    const colorDist = (c1: number[], c2: number[]) =>
       Math.abs(c1[0] - c2[0]) + Math.abs(c1[1] - c2[1]) + Math.abs(c1[2] - c2[2]);
 
     let cornersMatch = false;
@@ -95,26 +105,26 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
 
       if (isWhite) {
         const bgColor = tl;
-        const tolerance = 45; 
+        const tolerance = 45;
         const newData = Buffer.from(data);
         for (let i = 0; i < newData.length; i += 4) {
           const dist = Math.abs(newData[i] - bgColor[0]) + Math.abs(newData[i + 1] - bgColor[1]) + Math.abs(newData[i + 2] - bgColor[2]);
           if (dist <= tolerance) {
-            newData[i + 3] = 0; 
+            newData[i + 3] = 0;
           }
         }
         const transparentBuffer = await sharp(newData, { raw: { width, height, channels: 4 } }).png().toBuffer();
         return { buffer: transparentBuffer, type: 'bg_removed' };
       }
-      
+
       if (isBlack) {
         const bgColor = tl;
-        const tolerance = 45; 
+        const tolerance = 45;
         const newData = Buffer.from(data);
         for (let i = 0; i < newData.length; i += 4) {
           const dist = Math.abs(newData[i] - bgColor[0]) + Math.abs(newData[i + 1] - bgColor[1]) + Math.abs(newData[i + 2] - bgColor[2]);
           if (dist <= tolerance) {
-            newData[i + 3] = 0; 
+            newData[i + 3] = 0;
           }
         }
         const transparentBuffer = await sharp(newData, { raw: { width, height, channels: 4 } }).png().toBuffer();
@@ -138,7 +148,7 @@ async function cropToCircle(buffer: Buffer): Promise<Buffer> {
   const height = metadata.height ? metadata.height : 600;
   const size = Math.min(width, height);
   const r = size / 2;
-  
+
   const circleSvg = `<svg height="${size}" width="${size}"><circle cx="${r}" cy="${r}" r="${r}" fill="#fff"/></svg>`;
 
   return await sharp(buffer)
@@ -170,10 +180,10 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
 
     if (!response.ok) return null;
     if (response.status >= 400) return null;
-    
+
     const html = await response.text();
     const htmlLower = html.toLowerCase();
-    
+
     if (htmlLower.includes("dns_probe_finished_nxdomain")) return null;
     if (htmlLower.includes("page not found")) return null;
     if (htmlLower.includes("404 not found")) return null;
@@ -240,16 +250,16 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
 
       let alt = $(img).attr('alt');
       if (!alt) alt = '';
-      
+
       let className = $(img).attr('class');
       if (!className) className = '';
-      
+
       let id = $(img).attr('id');
       if (!id) id = '';
 
       let nameAttr = $(img).attr('name');
       if (!nameAttr) nameAttr = '';
-      
+
       let srcAttr = $(img).attr('src');
       if (!srcAttr) srcAttr = '';
 
@@ -291,7 +301,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
       let w = $(img).attr('width');
       if (w) {
         let wInt = parseInt(w);
-        if (wInt < 50) score -= 100; 
+        if (wInt < 50) score -= 100;
         if (wInt >= 150) score += 10;
         if (wInt >= 300) score += 20;
       }
@@ -301,7 +311,7 @@ async function extractLogoUrlFromWebsite(websiteUrl: string, domain: string): Pr
         if (bestSrc) {
           if (bestSrc.includes('width=')) score += 10;
           if (bestSrc.includes('optimize=')) score += 5;
-          
+
           if (isValidLogo(bestSrc)) {
             candidates.push({ url: bestSrc, score: score });
           }
@@ -335,9 +345,9 @@ function cleanFacebookUrl(rawUrl: string): string {
   if (!rawUrl) return "";
   if (typeof rawUrl !== "string") return "";
   if (rawUrl.trim() === "") return "";
-  
+
   let currentUrl = rawUrl.trim();
-  
+
   if (currentUrl.includes(',')) {
     currentUrl = currentUrl.split(',')[0].trim();
   }
@@ -371,7 +381,7 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
       const apifyClient = new ApifyClient({ token: APIFY_TOKENS[currentApifyIndex] });
       const run = await apifyClient.actor("apify/facebook-pages-scraper").call({ startUrls: [{ url: cleanFbUrl }], maxPosts: 0 });
       const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
-      
+
       if (items) {
         if (items[0]) {
           const data = items[0] as any;
@@ -388,15 +398,15 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
           }
 
           if (typeof rawImageUrl === 'object') {
-             if ((rawImageUrl as any).url) {
-               rawImageUrl = (rawImageUrl as any).url;
-             } else if ((rawImageUrl as any).src) {
-               rawImageUrl = (rawImageUrl as any).src;
-             }
+            if ((rawImageUrl as any).url) {
+              rawImageUrl = (rawImageUrl as any).url;
+            } else if ((rawImageUrl as any).src) {
+              rawImageUrl = (rawImageUrl as any).src;
+            }
           }
         }
       }
-      break; 
+      break;
     } catch (err: any) {
       currentApifyIndex = (currentApifyIndex + 1) % APIFY_TOKENS.length;
       attempts++;
@@ -435,7 +445,7 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
             if (result.colors[2]) tertiary = result.colors[2][0];
           }
         }
-        
+
         resolve({ url: result.secure_url, colors: { primary, secondary, tertiary } });
       }
     );
@@ -449,11 +459,11 @@ function isBadColors(p: string | null, s: string | null, t: string | null): bool
   const secondary = s ? s.toUpperCase() : "";
   const tertiary = t ? t.toUpperCase() : "";
 
-  if (primary === "#101928" && secondary === "#FFFFFF") return true; 
-  if (primary === "#0987C5" && secondary === "#FFFFFE" && tertiary === "#EFFBFD") return true; 
-  if (primary === "#000000" && secondary === "#000000") return true; 
-  if (primary === "#FFFFFF" && secondary === "") return true; 
-  
+  if (primary === "#101928" && secondary === "#FFFFFF") return true;
+  if (primary === "#0987C5" && secondary === "#FFFFFE" && tertiary === "#EFFBFD") return true;
+  if (primary === "#000000" && secondary === "#000000") return true;
+  if (primary === "#FFFFFF" && secondary === "") return true;
+
   return false;
 }
 
@@ -462,9 +472,9 @@ function isBadColors(p: string | null, s: string | null, t: string | null): bool
 // ---------------------------------------------------------
 export async function POST(req: Request) {
   try {
-    const lead = await req.json(); 
+    const lead = await req.json();
     const websiteUrl = lead.Website;
-    
+
     let fbUrl = lead.Facebook;
     if (!fbUrl) fbUrl = lead.facebookurl;
     if (!fbUrl) fbUrl = lead.aifacebook;
@@ -495,17 +505,17 @@ export async function POST(req: Request) {
         if (domain.startsWith('www.')) domain = domain.substring(4);
 
         const extractedUrl = await extractLogoUrlFromWebsite(websiteUrl, domain);
-        
+
         if (extractedUrl) {
           const imgRes = await fetch(extractedUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
           if (imgRes.ok) {
             const buffer = Buffer.from(await imgRes.arrayBuffer());
             const result = await processAndUpload(buffer);
-            
+
             if (!isBadColors(result.cData.colors.primary, result.cData.colors.secondary, result.cData.colors.tertiary)) {
-               finalCloudinaryData = result.cData;
-               source = 'website';
-               finalType = result.type;
+              finalCloudinaryData = result.cData;
+              source = 'website';
+              finalType = result.type;
             }
           }
         }
@@ -529,13 +539,13 @@ export async function POST(req: Request) {
 
     // 3. NO MORE TEXT LOGO GENERATION! Just skip if nothing is found.
     if (!finalCloudinaryData) {
-       return NextResponse.json({
-         success: true,
-         sourceUsed: 'none',
-         processingResult: 'skipped',
-         logoUrl: '',
-         colors: { primary: null, secondary: null, tertiary: null }
-       });
+      return NextResponse.json({
+        success: true,
+        sourceUsed: 'none',
+        processingResult: 'skipped',
+        logoUrl: '',
+        colors: { primary: null, secondary: null, tertiary: null }
+      });
     }
 
     return NextResponse.json({

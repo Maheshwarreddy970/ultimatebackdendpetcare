@@ -7,18 +7,28 @@ import { ApifyClient } from 'apify-client';
 import sharp from 'sharp';
 
 cloudinary.config({
-  cloud_name: 'ta5klglv',
-  api_key: '228386464312455',
-  api_secret: 'pIoksKtT9h6ez0k3KhbcwjAoU7o',
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 
+
 const APIFY_TOKENS = [
-  'apify_api_zP6UkcgE9nEdRfvtxgfH9C9S9VG50G26Ch4U',
-  'apify_api_NkPekUe1mhtcpLovU8fKmQPxFDj5oM4q00FG',
-  'apify_api_Z3q3Jydg3u2k1TM4ELrWYcIUIa4hJC12BcNW',
-  'apify_api_SoNIAG1xuFYPPzs3eZEenIedgryI7a3xcivO'
-];
+  process.env.APIFY_TOKEN_1,
+  process.env.APIFY_TOKEN_2,
+  process.env.APIFY_TOKEN_3,
+  process.env.APIFY_TOKEN_4,
+  process.env.APIFY_TOKEN_5,
+  process.env.APIFY_TOKEN_6,
+  process.env.APIFY_TOKEN_7,
+  process.env.APIFY_TOKEN_8,
+  process.env.APIFY_TOKEN_9,
+  process.env.APIFY_TOKEN_10,
+  process.env.APIFY_TOKEN_11,
+  process.env.APIFY_TOKEN_12,
+].filter(Boolean);
+
 let currentApifyIndex = 0;
 
 function cleanFacebookUrl(rawUrl: string): string {

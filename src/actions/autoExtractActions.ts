@@ -8,17 +8,26 @@ import * as cheerio from 'cheerio';
 import sharp from 'sharp';
 
 cloudinary.config({
-  cloud_name: 'ta5klglv',
-  api_key: '228386464312455',
-  api_secret: 'pIoksKtT9h6ez0k3KhbcwjAoU7o',
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 const APIFY_TOKENS = [
-  'apify_api_zP6UkcgE9nEdRfvtxgfH9C9S9VG50G26Ch4U',
-  'apify_api_NkPekUe1mhtcpLovU8fKmQPxFDj5oM4q00FG',
-  'apify_api_Z3q3Jydg3u2k1TM4ELrWYcIUIa4hJC12BcNW',
-  'apify_api_SoNIAG1xuFYPPzs3eZEenIedgryI7a3xcivO'
-];
+  process.env.APIFY_TOKEN_1,
+  process.env.APIFY_TOKEN_2,
+  process.env.APIFY_TOKEN_3,
+  process.env.APIFY_TOKEN_4,
+  process.env.APIFY_TOKEN_5,
+  process.env.APIFY_TOKEN_6,
+  process.env.APIFY_TOKEN_7,
+  process.env.APIFY_TOKEN_8,
+  process.env.APIFY_TOKEN_9,
+  process.env.APIFY_TOKEN_10,
+  process.env.APIFY_TOKEN_11,
+  process.env.APIFY_TOKEN_12,
+].filter(Boolean);
+
 let currentApifyIndex = 0;
 
 const BANNED_KEYWORDS = ['facebook', 'instagram', 'twitter', 'linkedin', 'tiktok', 'youtube', 'pinterest', 'google', 'placeholder', 'spinner', 'flag', 'hero', 'banner'];
@@ -67,15 +76,15 @@ async function processImagePixels(buffer: Buffer): Promise<Buffer> {
       bgColor = br;
     }
 
-    const tolerance = 45; 
+    const tolerance = 45;
     const newData = Buffer.from(data);
     for (let i = 0; i < newData.length; i += 4) {
       const dist = Math.abs(newData[i] - bgColor[0]) + Math.abs(newData[i + 1] - bgColor[1]) + Math.abs(newData[i + 2] - bgColor[2]);
       if (dist <= tolerance) {
-        newData[i + 3] = 0; 
+        newData[i + 3] = 0;
       }
     }
-    
+
     return await sharp(newData, { raw: { width, height, channels: 4 } }).png().toBuffer();
   } catch (err) {
     return buffer;
@@ -105,7 +114,7 @@ async function getBestLogoBufferFromWebsite(websiteUrl: string, domain: string):
     if (response.status >= 400) return null;
     const html = await response.text();
     const htmlLower = html.toLowerCase();
-    
+
     if (htmlLower.includes("dns_probe_finished")) return null;
     if (htmlLower.includes("page not found")) return null;
 
@@ -165,7 +174,7 @@ async function getBestLogoBufferFromWebsite(websiteUrl: string, domain: string):
 
     $('div, span, a, header, nav, section').each((_, container) => {
       let isLogoContainer = false;
-      
+
       let className = $(container).attr('class'); if (!className) className = '';
       let id = $(container).attr('id'); if (!id) id = '';
       let dataGuide = $(container).attr('data-guide-target'); if (!dataGuide) dataGuide = '';
@@ -192,11 +201,11 @@ async function getBestLogoBufferFromWebsite(websiteUrl: string, domain: string):
       if (isLogoContainer) {
         const img = $(container).find('img').first();
         if (img.length > 0) {
-          let score = 10000; 
+          let score = 10000;
           let w = $(img).attr('width');
           if (w) {
             let wInt = parseInt(w);
-            if (wInt < 60) score -= 20000; 
+            if (wInt < 60) score -= 20000;
           }
 
           const bestSrc = getBestImageSrc(img[0]);
@@ -213,7 +222,7 @@ async function getBestLogoBufferFromWebsite(websiteUrl: string, domain: string):
       let imageIndex = 0;
       $('img').each((_, img) => {
         imageIndex++;
-        let score = 500 - imageIndex; 
+        let score = 500 - imageIndex;
 
         let alt = $(img).attr('alt'); if (!alt) alt = '';
         if (alt.toLowerCase().includes('logo')) score += 5000;
@@ -221,7 +230,7 @@ async function getBestLogoBufferFromWebsite(websiteUrl: string, domain: string):
         let w = $(img).attr('width');
         if (w) {
           let wInt = parseInt(w);
-          if (wInt < 60) score -= 20000; 
+          if (wInt < 60) score -= 20000;
         }
 
         const bestSrc = getBestImageSrc(img);
@@ -245,7 +254,7 @@ async function getBestLogoBufferFromWebsite(websiteUrl: string, domain: string):
         if (res.ok) {
           return Buffer.from(await res.arrayBuffer());
         }
-      } catch (err) {}
+      } catch (err) { }
     }
 
     return null;
@@ -262,10 +271,10 @@ function cleanFacebookUrl(rawUrl: string): string {
   if (typeof rawUrl !== "string") return "";
   let currentUrl = rawUrl.trim();
   if (currentUrl === "") return "";
-  
+
   if (currentUrl.includes(',')) currentUrl = currentUrl.split(',')[0].trim();
   if (!currentUrl.startsWith("http")) currentUrl = "https://" + currentUrl;
-  
+
   try {
     const urlObj = new URL(currentUrl);
     if (urlObj.hostname.includes("facebook.com")) {
@@ -278,8 +287,8 @@ function cleanFacebookUrl(rawUrl: string): string {
       return urlObj.toString();
     }
     return currentUrl;
-  } catch { 
-    return rawUrl; 
+  } catch {
+    return rawUrl;
   }
 }
 
@@ -295,7 +304,7 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
       const apifyClient = new ApifyClient({ token: APIFY_TOKENS[currentApifyIndex] });
       const run = await apifyClient.actor("apify/facebook-pages-scraper").call({ startUrls: [{ url: cleanFbUrl }], resultsLimit: 1 });
       const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
-      
+
       if (items) {
         if (items[0]) {
           const data = items[0] as any;
@@ -306,12 +315,12 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
           else if (data.avatar) { rawImageUrl = data.avatar; }
 
           if (typeof rawImageUrl === 'object') {
-             if ((rawImageUrl as any).url) { rawImageUrl = (rawImageUrl as any).url; } 
-             else if ((rawImageUrl as any).src) { rawImageUrl = (rawImageUrl as any).src; }
+            if ((rawImageUrl as any).url) { rawImageUrl = (rawImageUrl as any).url; }
+            else if ((rawImageUrl as any).src) { rawImageUrl = (rawImageUrl as any).src; }
           }
         }
       }
-      break; 
+      break;
     } catch (err: any) {
       currentApifyIndex = (currentApifyIndex + 1) % APIFY_TOKENS.length;
       attempts++;
@@ -321,16 +330,16 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
   if (rawImageUrl) {
     const highResUrl = rawImageUrl.replace(/\d+x\d+/g, '960x960');
     let imgRes: Response | null = null;
-    
+
     try {
       imgRes = await fetch(highResUrl, { signal: AbortSignal.timeout(10000) });
-    } catch (e) {}
+    } catch (e) { }
 
     if (!imgRes) {
-      try { imgRes = await fetch(rawImageUrl, { signal: AbortSignal.timeout(10000) }); } catch (e) {}
+      try { imgRes = await fetch(rawImageUrl, { signal: AbortSignal.timeout(10000) }); } catch (e) { }
     } else {
       if (!imgRes.ok) {
-        try { imgRes = await fetch(rawImageUrl, { signal: AbortSignal.timeout(10000) }); } catch (e) {}
+        try { imgRes = await fetch(rawImageUrl, { signal: AbortSignal.timeout(10000) }); } catch (e) { }
       }
     }
 
@@ -453,11 +462,11 @@ export async function uploadCustomLogo(docId: string, formData: FormData) {
   try {
     const file = formData.get('file') as File;
     if (!file) throw new Error("No file uploaded");
-    
+
     const buffer = Buffer.from(await file.arrayBuffer());
     const cleanId = `custom_${Date.now()}`;
     const res = await uploadBufferToCloudinaryPublic(buffer, cleanId);
-    
+
     let primary = ""; let secondary = ""; let tertiary = "";
     if (res.colors) {
       if (res.colors.primary) primary = res.colors.primary;
@@ -476,7 +485,7 @@ export async function manualRemoveBackground(docId: string, imageUrl: string) {
   try {
     const response = await fetch(imageUrl);
     if (!response.ok) throw new Error("Failed to fetch image");
-    
+
     const buffer = Buffer.from(await response.arrayBuffer());
     const processedBuffer = await processImagePixels(buffer);
     const cleanId = `manual_bg_${Date.now()}`;

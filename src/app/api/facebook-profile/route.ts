@@ -6,20 +6,29 @@ import { ApifyClient } from 'apify-client';
 // CLOUDINARY CONFIG
 // ---------------------------------------------------------
 cloudinary.config({
-  cloud_name: 'dduwiqu4j',
-  api_key: '735486643625886',
-  api_secret: 'EQVhBgJCEv3t_EgfKHcKSjEJTqA',
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 // ---------------------------------------------------------
 // APIFY TOKEN ROTATION
 // ---------------------------------------------------------
 const APIFY_TOKENS = [
-  'apify_api_zP6UkcgE9nEdRfvtxgfH9C9S9VG50G26Ch4U',
-  'apify_api_NkPekUe1mhtcpLovU8fKmQPxFDj5oM4q00FG',
-  'apify_api_Z3q3Jydg3u2k1TM4ELrWYcIUIa4hJC12BcNW',
-  'apify_api_SoNIAG1xuFYPPzs3eZEenIedgryI7a3xcivO'
-];
+  process.env.APIFY_TOKEN_1,
+  process.env.APIFY_TOKEN_2,
+  process.env.APIFY_TOKEN_3,
+  process.env.APIFY_TOKEN_4,
+  process.env.APIFY_TOKEN_5,
+  process.env.APIFY_TOKEN_6,
+  process.env.APIFY_TOKEN_7,
+  process.env.APIFY_TOKEN_8,
+  process.env.APIFY_TOKEN_9,
+  process.env.APIFY_TOKEN_10,
+  process.env.APIFY_TOKEN_11,
+  process.env.APIFY_TOKEN_12,
+].filter(Boolean);
+
 
 let currentApifyIndex = 0;
 
@@ -109,9 +118,9 @@ async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any
           tertiary = result.colors[2]?.[0] || null;
         }
 
-        resolve({ 
-          url: optimizedUrl, 
-          colors: { primary, secondary, tertiary } 
+        resolve({
+          url: optimizedUrl,
+          colors: { primary, secondary, tertiary }
         });
       }
     );
@@ -131,12 +140,12 @@ async function getProfilePicViaApify(facebookUrl: string): Promise<string> {
 
     try {
       const apifyClient = new ApifyClient({ token });
-      
+
       const run = await apifyClient.actor("apify/facebook-pages-scraper").call({
         startUrls: [{ url: facebookUrl }],
         maxPosts: 0
       });
-      
+
       const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
 
       if (!items || items.length === 0 || !items[0]) {
@@ -145,12 +154,12 @@ async function getProfilePicViaApify(facebookUrl: string): Promise<string> {
 
       const data = items[0] as any;
 
-      let profilePicUrl = 
-        data.profilePictureUrl || 
-        data.profilePicture || 
-        data.profilePic || 
-        data.profilePicUrl || 
-        data.image || 
+      let profilePicUrl =
+        data.profilePictureUrl ||
+        data.profilePicture ||
+        data.profilePic ||
+        data.profilePicUrl ||
+        data.image ||
         data.avatar;
 
       if (typeof profilePicUrl === 'object' && profilePicUrl !== null) {
@@ -166,9 +175,9 @@ async function getProfilePicViaApify(facebookUrl: string): Promise<string> {
     } catch (error: any) {
       console.error(`Error with token ${currentApifyIndex}:`, error.message);
 
-      const isRateLimit = 
-        error?.message?.includes('429') || 
-        error?.http_code === 429 || 
+      const isRateLimit =
+        error?.message?.includes('429') ||
+        error?.http_code === 429 ||
         error?.response?.status === 429 ||
         error?.message?.toLowerCase().includes('unauthorized') ||
         error?.message?.toLowerCase().includes('limit');
@@ -194,7 +203,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const rawFacebookUrl = body.facebookUrl;
-    let rawImageUrl = body.facebookImageUrl; 
+    let rawImageUrl = body.facebookImageUrl;
 
     if (!rawFacebookUrl && !rawImageUrl) {
       return NextResponse.json({ success: false, error: "Provide either facebookUrl or facebookImageUrl" }, { status: 400 });
@@ -229,7 +238,7 @@ export async function POST(req: Request) {
     const arrayBuffer = await imageResponse.arrayBuffer();
     const finalBuffer = Buffer.from(arrayBuffer);
 
-    const cleanId = facebookUrl 
+    const cleanId = facebookUrl
       ? facebookUrl.replace(/https?:\/\/(www\.)?facebook\.com\//, '').replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now()
       : 'fb_profile_' + Date.now();
 
@@ -239,7 +248,7 @@ export async function POST(req: Request) {
       success: true,
       originalDirtyUrl: rawFacebookUrl,
       cleanedUrlUsed: facebookUrl,
-      logoUrl: cloudinaryData.url, 
+      logoUrl: cloudinaryData.url,
       colors: cloudinaryData.colors
     });
 
