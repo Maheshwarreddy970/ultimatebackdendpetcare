@@ -28,6 +28,7 @@ export default async function FirebaseNavbarPage() {
     getReviewLeadsCount()
   ]);
 
+
   return (
     <main className="min-h-screen pb-20 bg-gray-50">
       <div className="w-full text-center py-8">

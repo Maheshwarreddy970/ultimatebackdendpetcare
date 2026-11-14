@@ -57,15 +57,7 @@ export default function PushDataPage() {
 
           // 🔥 BULLETPROOF AUTO-APPROVE LOGIC
           let finalStatus = "pending";
-          if (item.logoUrl) {
-            if (typeof item.logoUrl === 'string') {
-              const cleanUrl = item.logoUrl.trim();
-              // Checks if there is a real URL (skips blank spaces or errors)
-              if (cleanUrl.startsWith('http')) {
-                finalStatus = "approved";
-              }
-            }
-          }
+        
 
           // We explicitly OVERWRITE whatever logoStatus was in the CSV/JSON
           const cleanData = {

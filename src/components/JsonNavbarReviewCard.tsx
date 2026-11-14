@@ -24,7 +24,7 @@ interface FirebaseLeadItem {
 export default function JsonNavbarReviewCard({ item }: { item: FirebaseLeadItem }) {
   const [isBlack, setIsBlack] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
-  
+
   // Dig into the nested JSON to find the logo if the root logoUrl is empty
   const extractedLogo = item.logoUrl 
     || item?.websiteOneData?.navbar?.logo?.src 

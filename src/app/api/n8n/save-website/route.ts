@@ -83,29 +83,28 @@ export async function POST(req: Request) {
     const btnTextColor = getContrastColor(pColor);
     const darkBgIconColor = isDarkColor(pColor) ? "#ffffff" : pColor;
 
-    // 🔥 GENERATE UNIQUE SLUG
-    let baseSlug = aiData.businessName.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "-").toLowerCase();
-    baseSlug = baseSlug.replace(/-+/g, '-');
+    const cleanName = aiData.businessName.replace(/[^a-zA-Z0-9 ]/g, "").trim().toLowerCase();
+    const words = cleanName.split(/\s+/);
+
+    // Take only the first 2 words to keep it super short (e.g., "See Spot Walk" -> "see-spot")
+    let baseSlug = words.slice(0, 2).join("-");
+    if (!baseSlug) baseSlug = "petcare"; // Fallback if name is empty
+
     let finalSlug = baseSlug;
+    let count = 1;
 
-    let slugSnap = await getDoc(doc(db, "websites", finalSlug));
-
-    if (slugSnap.exists()) {
-      const addressString = realAddress || "";
-      const addressParts = addressString.split(',').map((p: string) => p.trim());
-      let locationModifier = "petcare";
-      if (addressParts.length > 2) locationModifier = addressParts[1];
-      else if (addressParts.length === 2) locationModifier = addressParts[0];
-      else if (addressParts.length === 1 && addressParts[0]) locationModifier = addressParts[0];
-
-      const cleanLocation = locationModifier.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "-").toLowerCase();
-      finalSlug = `${baseSlug}-${cleanLocation}`.replace(/-+/g, '-');
-
-      const doubleCheckSnap = await getDoc(doc(db, "websites", finalSlug));
-      if (doubleCheckSnap.exists()) finalSlug = `${finalSlug}-grooming`;
+    // Loop to check if slug exists. If duplicate, just append a short number (e.g., see-spot-1)
+    while (true) {
+      const slugSnap = await getDoc(doc(db, "websites", finalSlug));
+      if (!slugSnap.exists()) {
+        break; // We found a unique slug
+      }
+      finalSlug = `${baseSlug}-${count}`;
+      count++;
     }
 
     const safeStatsHeading = aiData.statsHeading ? aiData.statsHeading.replace(/`/g, '') : "Our Commitment to Pet Wellness";
+
 
     // 🔥 BUILD THE PERFECT, FULLY-STYLED JSON STRUCTURE
     const websiteOneData = {
@@ -290,7 +289,6 @@ export async function POST(req: Request) {
       }
     };
 
-    // 🔥 CREATE THE NEW WEBSITE DOCUMENT IN THE 'websites' COLLECTION
     const websiteDocData = {
       slug: finalSlug,
       ownerEmail: email,
@@ -300,22 +298,21 @@ export async function POST(req: Request) {
       domainStatus: "none",
       template: "websiteOne",
       lastUpdated: new Date().toISOString(),
-      websiteOneData: websiteOneData
+      websiteOneData: websiteOneData // Assuming you have this defined above
     };
-
     const websiteDocRef = doc(db, "websites", finalSlug);
     await setDoc(websiteDocRef, websiteDocData);
 
-    // 🔥 UPDATE THE LEAD TO LINK IT TO THE NEW WEBSITE
-    await updateDoc(leadDocRef, {
+ await updateDoc(leadDocRef, {
       websiteSlug: finalSlug,
       websiteGeneratedAt: new Date().toISOString()
     });
 
+    // 👇 THIS IS THE FIX 
     return NextResponse.json({
       success: true,
       slug: finalSlug,
-      url: `${finalSlug}.nexpetcare.com`,
+      url: `https://nexpetcare.com/${finalSlug}`, 
       message: "Website configured and saved successfully."
     });
 
