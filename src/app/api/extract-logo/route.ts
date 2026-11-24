@@ -252,7 +252,7 @@ async function processImagePixels(buffer: Buffer): Promise<{ buffer: Buffer, typ
 }
 
 // ---------------------------------------------------------
-// 2. CIRCULAR CROPPING FOR PHOTOS (Facebook profile pictures only)
+// 2. CIRCULAR CROPPING FOR PHOTOS (Facebook + Instagram profile pictures only)
 // ---------------------------------------------------------
 async function cropToCircle(buffer: Buffer): Promise<Buffer> {
   const metadata = await sharp(buffer).metadata();
@@ -630,6 +630,106 @@ async function scrapeFacebookPic(fbRawUrl: string): Promise<Buffer | null> {
 }
 
 // ---------------------------------------------------------
+// 4b. INSTAGRAM SCRAPER (fallback after Website + Facebook)
+// ---------------------------------------------------------
+// First path segments on instagram.com that are NOT a profile (posts, reels, explore, etc.)
+const INSTAGRAM_NON_PROFILE_PATHS = [
+  'p', 'reel', 'reels', 'tv', 'explore', 'stories', 'accounts', 'direct',
+  'about', 'legal', 'developer', 'share', 'web', 'challenge', 'oauth',
+];
+
+// Accepts a full Instagram URL, "instagram.com/name", "@name" or a bare "name" and returns ONLY the username.
+// Returns "" when the value is not a profile (post / reel / explore link, wrong host, junk).
+function extractInstagramUsername(rawUrl: string): string {
+  if (typeof rawUrl !== 'string') return '';
+  let current = rawUrl.trim();
+  if (current === '') return '';
+
+  if (current.includes(',')) {
+    current = current.split(',')[0].trim();
+  }
+
+  const isValidName = (n: string) => /^[A-Za-z0-9._]{1,30}$/.test(n);
+
+  if (current.startsWith('@')) {
+    const name = current.substring(1);
+    if (isValidName(name)) return name;
+    return '';
+  }
+
+  // bare username (no slash, not a domain)
+  if (!current.includes('/')) {
+    if (!current.toLowerCase().includes('instagram.com')) {
+      if (isValidName(current)) return current;
+      return '';
+    }
+  }
+
+  if (!current.startsWith('http')) current = 'https://' + current;
+  try {
+    const urlObj = new URL(current);
+    const h = stripWww(urlObj.hostname);
+    if (h !== 'instagram.com') {
+      if (!h.endsWith('.instagram.com')) return '';
+    }
+
+    let segments = urlObj.pathname.split('/').filter(Boolean);
+    if (segments.length > 0) {
+      if (segments[0] === '_u') segments = segments.slice(1);   // instagram.com/_u/name deep links
+    }
+    if (segments.length === 0) return '';
+
+    const first = segments[0];
+    if (INSTAGRAM_NON_PROFILE_PATHS.includes(first.toLowerCase())) return '';
+    if (isValidName(first)) return first;
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+async function scrapeInstagramPic(igRawUrl: string): Promise<Buffer | null> {
+  const username = extractInstagramUsername(igRawUrl);
+  if (username === '') return null;
+
+  let attempts = 0;
+  let rawImageUrl = "";
+
+  while (attempts < APIFY_TOKENS.length) {
+    try {
+      const apifyClient = new ApifyClient({ token: APIFY_TOKENS[currentApifyIndex] });
+      const run = await apifyClient.actor("apify/instagram-profile-scraper").call({ usernames: [username] });
+      const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
+
+      if (items) {
+        if (items[0]) {
+          const data = items[0] as any;
+          // HD first, then the normal size. (Different Instagram actors spell it profilePicUrlHD / profilePicUrlHd)
+          if (str(data.profilePicUrlHD) !== '') {
+            rawImageUrl = data.profilePicUrlHD;
+          } else if (str(data.profilePicUrlHd) !== '') {
+            rawImageUrl = data.profilePicUrlHd;
+          } else if (str(data.profilePicUrl) !== '') {
+            rawImageUrl = data.profilePicUrl;
+          }
+        }
+      }
+      break;
+    } catch (err: any) {
+      currentApifyIndex = (currentApifyIndex + 1) % APIFY_TOKENS.length;
+      attempts++;
+    }
+  }
+
+  if (rawImageUrl !== '') {
+    // Instagram CDN links are signed and expire, so download immediately and do NOT edit the URL
+    // (unlike Facebook, rewriting the size in the URL would break the signature and return 403).
+    return await downloadImage(rawImageUrl, 'https://www.instagram.com/');
+  }
+  return null;
+}
+
+// ---------------------------------------------------------
 // CLOUDINARY FINAL UPLOAD (RAW PUBLIC URL)
 // ---------------------------------------------------------
 async function uploadToCloudinary(buffer: Buffer, publicId: string): Promise<any> {
@@ -692,13 +792,19 @@ export async function POST(req: Request) {
     if (!fbUrl) fbUrl = lead.aifacebook;
     if (!fbUrl) fbUrl = lead["extracted facebook"];
 
+    // Instagram field names mirror the Facebook ones above. Rename here if your lead payload uses different keys.
+    let igUrl = lead.Instagram;
+    if (!igUrl) igUrl = lead.instagramurl;
+    if (!igUrl) igUrl = lead.aiinstagram;
+    if (!igUrl) igUrl = lead["extracted instagram"];
+
     let finalCloudinaryData: any = null;
     let finalType = 'none';
     let source = 'none';
     let logoSourceUrl = '';
     let matchReasons: string[] = [];
 
-    // circle crop is ONLY for Facebook profile photos. Website logos must never be cropped
+    // circle crop is ONLY for Facebook / Instagram profile photos. Website logos must never be cropped
     // (a wide 787x273 logo would lose its sides).
     const processAndUpload = async (buffer: Buffer, allowCircleCrop: boolean) => {
       const { buffer: processedBuffer, type } = await processImagePixels(buffer);
@@ -767,7 +873,22 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. NO MORE TEXT LOGO GENERATION! Just skip if nothing is found.
+    // 3. Try Instagram Fallback (only when Website AND Facebook found nothing)
+    if (!finalCloudinaryData) {
+      if (typeof igUrl === 'string') {
+        if (igUrl.trim() !== '') {
+          const igBuffer = await scrapeInstagramPic(igUrl);
+          if (igBuffer) {
+            const result = await processAndUpload(igBuffer, true);
+            finalCloudinaryData = result.cData;
+            source = 'instagram';
+            finalType = result.type;
+          }
+        }
+      }
+    }
+
+    // 4. NO MORE TEXT LOGO GENERATION! Just skip if nothing is found.
     if (!finalCloudinaryData) {
       return NextResponse.json({
         success: true,
